@@ -1,78 +1,56 @@
+# fichier: train_ticket_classifier.py
+
 from datasets import load_dataset
-from transformers import AutoTokenizer, DistilBertForSequenceClassification, Trainer, TrainingArguments
-from sklearn.preprocessing import LabelEncoder
-import torch
-import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, classification_report
 
 # 1️⃣ Charger le dataset
 dataset = load_dataset("Tobi-Bueck/customer-support-tickets")
-dataset = dataset.filter(lambda x: x['type'] in ['Change', 'Incident', 'Problem', 'Request'])
+
+# Filtrer pour ne garder que les classes principales
+valid_classes = ['Change', 'Incident', 'Problem', 'Request']
+dataset = dataset.filter(lambda x: x['type'] in valid_classes)
 
 # 2️⃣ Préparer les textes et labels
-texts = [ (x if x else "") + ". " + (y if y else "") 
-          for x, y in zip(dataset['train']['subject'], dataset['train']['body'])]
-labels = LabelEncoder().fit_transform(dataset['train']['type'])
+texts = []
+labels = []
+for subj, body, label in zip(dataset['train']['subject'], dataset['train']['body'], dataset['train']['type']):
+    subj = subj if subj else ""
+    body = body if body else ""
+    texts.append(subj + ". " + body)
+    labels.append(label)
 
-# Split simple train/test
-split = int(0.8 * len(texts))
-train_texts, test_texts = texts[:split], texts[split:]
-train_labels, test_labels = labels[:split], labels[split:]
-
-# 3️⃣ Tokenizer
-tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
-train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=256)
-test_encodings = tokenizer(test_texts, truncation=True, padding=True, max_length=256)
-
-# 4️⃣ Dataset PyTorch
-class TicketDataset(torch.utils.data.Dataset):
-    def __init__(self, encodings, labels):
-        self.encodings = encodings
-        self.labels = labels
-    def __len__(self):
-        return len(self.labels)
-    def __getitem__(self, idx):
-        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
-        item['labels'] = torch.tensor(self.labels[idx])
-        return item
-
-train_dataset = TicketDataset(train_encodings, train_labels)
-test_dataset = TicketDataset(test_encodings, test_labels)
-
-# 5️⃣ Modèle
-model = DistilBertForSequenceClassification.from_pretrained(
-    "distilbert-base-uncased",
-    num_labels=4  # Change, Incident, Problem, Request
+# 3️⃣ Split train/test
+X_train, X_test, y_train, y_test = train_test_split(
+    texts, labels, test_size=0.2, random_state=42
 )
 
-# 6️⃣ Métriques
-def compute_metrics(eval_pred):
-    logits, labels = eval_pred
-    predictions = np.argmax(logits, axis=-1)
-    return {"accuracy": (predictions == labels).mean()}
+# 4️⃣ Créer un pipeline TF-IDF + Logistic Regression
+pipeline = Pipeline([
+    ('tfidf', TfidfVectorizer(max_features=5000, stop_words='english')),
+    ('clf', LogisticRegression(max_iter=1000))
+])
 
-# 7️⃣ Arguments d'entraînement
-training_args = TrainingArguments(
-    output_dir="./results",
-    num_train_epochs=3,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
-    learning_rate=5e-5,
-    save_strategy="epoch",
-    evaluation_strategy="epoch",
-    load_best_model_at_end=True,
-    metric_for_best_model="accuracy",
-    report_to="none"
-)
+# 5️⃣ Entraîner le modèle
+pipeline.fit(X_train, y_train)
 
-# 8️⃣ Trainer
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=test_dataset,
-    compute_metrics=compute_metrics,
-    tokenizer=tokenizer
-)
+# 6️⃣ Évaluer le modèle
+y_pred = pipeline.predict(X_test)
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
 
-# 9️⃣ Lancer l'entraînement
-trainer.train()
+# 7️⃣ Prédire un nouveau ticket
+def predict_ticket(subject, body):
+    text = (subject if subject else "") + ". " + (body if body else "")
+    return pipeline.predict([text])[0]
+
+# Exemple d'utilisation
+nouveau_ticket = {
+    "subject": "Problème avec l'impression réseau",
+    "body": "L'imprimante du département marketing ne répond plus depuis ce matin."
+}
+prediction = predict_ticket(nouveau_ticket['subject'], nouveau_ticket['body'])
+print("\nNouvelle prédiction:", prediction)
