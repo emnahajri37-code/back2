@@ -1,59 +1,30 @@
-# train_ai_model.py
 from datasets import load_dataset
+from transformers import AutoTokenizer, DistilBertForSequenceClassification, Trainer, TrainingArguments
 from sklearn.preprocessing import LabelEncoder
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
 import torch
-from torch.utils.data import Dataset
+import numpy as np
 
-# -------------------------------
 # 1️⃣ Charger le dataset
-# -------------------------------
-print("Chargement du dataset…")
 dataset = load_dataset("Tobi-Bueck/customer-support-tickets")
-print("Colonnes disponibles:", dataset['train'].column_names)
+dataset = dataset.filter(lambda x: x['type'] in ['Change', 'Incident', 'Problem', 'Request'])
 
-# -------------------------------
+# 2️⃣ Préparer les textes et labels
+texts = [ (x if x else "") + ". " + (y if y else "") 
+          for x, y in zip(dataset['train']['subject'], dataset['train']['body'])]
+labels = LabelEncoder().fit_transform(dataset['train']['type'])
 
-# 2️⃣ Filtrer les données et préparer labels
-# -------------------------------
-dataset = dataset.filter(lambda x: x['type'] is not None)
-labels = list(set(dataset['train']['type']))
-print("Classes après filtrage:", labels)
+# Split simple train/test
+split = int(0.8 * len(texts))
+train_texts, test_texts = texts[:split], texts[split:]
+train_labels, test_labels = labels[:split], labels[split:]
 
-# -------------------------------
-# 3️⃣ Créer split train/test
-# -------------------------------
-dataset = dataset['train'].train_test_split(test_size=0.1, seed=42)
-train_data = dataset['train']
-test_data = dataset['test']
-
-# Encoder les labels en nombres
-label_encoder = LabelEncoder()
-train_labels = label_encoder.fit_transform(train_data['type'])
-test_labels = label_encoder.transform(test_data['type'])
-
-# Préparer les textes en gérant les None
-train_texts = [
-    (t['subject'] if t['subject'] else "") + ". " + (t['body'] if t['body'] else "")
-    for t in train_data
-]
-test_texts = [
-    (t['subject'] if t['subject'] else "") + ". " + (t['body'] if t['body'] else "")
-    for t in test_data
-]
-# -------------------------------
-# 4️⃣ Tokenizer
-# -------------------------------
-model_name = "distilbert-base-uncased"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-
+# 3️⃣ Tokenizer
+tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
 train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=256)
 test_encodings = tokenizer(test_texts, truncation=True, padding=True, max_length=256)
 
-# -------------------------------
-# 5️⃣ Dataset PyTorch
-# -------------------------------
-class TicketDataset(Dataset):
+# 4️⃣ Dataset PyTorch
+class TicketDataset(torch.utils.data.Dataset):
     def __init__(self, encodings, labels):
         self.encodings = encodings
         self.labels = labels
@@ -67,42 +38,41 @@ class TicketDataset(Dataset):
 train_dataset = TicketDataset(train_encodings, train_labels)
 test_dataset = TicketDataset(test_encodings, test_labels)
 
-# -------------------------------
-# 6️⃣ Modèle
-# -------------------------------
-model = AutoModelForSequenceClassification.from_pretrained(
-    model_name,
-    num_labels=len(labels)
+# 5️⃣ Modèle
+model = DistilBertForSequenceClassification.from_pretrained(
+    "distilbert-base-uncased",
+    num_labels=4  # Change, Incident, Problem, Request
 )
 
-# -------------------------------
-# 7️⃣ Entraînement
-# -------------------------------
+# 6️⃣ Métriques
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    predictions = np.argmax(logits, axis=-1)
+    return {"accuracy": (predictions == labels).mean()}
+
+# 7️⃣ Arguments d'entraînement
 training_args = TrainingArguments(
     output_dir="./results",
     num_train_epochs=3,
     per_device_train_batch_size=16,
     per_device_eval_batch_size=16,
-    evaluation_strategy="epoch",
+    learning_rate=5e-5,
     save_strategy="epoch",
-    logging_dir="./logs",
-    logging_steps=50,
-    load_best_model_at_end=True
+    evaluation_strategy="epoch",
+    load_best_model_at_end=True,
+    metric_for_best_model="accuracy",
+    report_to="none"
 )
 
+# 8️⃣ Trainer
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=test_dataset,
+    compute_metrics=compute_metrics,
     tokenizer=tokenizer
 )
 
+# 9️⃣ Lancer l'entraînement
 trainer.train()
-
-# -------------------------------
-# 8️⃣ Sauvegarder le modèle
-# -------------------------------
-model.save_pretrained("./ticket_classifier_model")
-tokenizer.save_pretrained("./ticket_classifier_model")
-print("Modèle entraîné et sauvegardé !")
