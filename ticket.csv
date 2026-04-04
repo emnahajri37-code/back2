@@ -1,0 +1,11 @@
+subject,body,priority
+Serveur en panne,Le serveur de production est inaccessible depuis 2 heures,high
+Bug interface,Le bouton de connexion ne fonctionne pas,normal
+Demande info,Peux-tu m'envoyer le rapport mensuel ?,low
+Erreur login,Impossible de se connecter avec certains utilisateurs,high
+Mise à jour,Merci de mettre à jour la base de données ce soir,normal
+Petit bug,Le texte du menu est mal aligné sur mobile,low
+Crash application,L'application plante quand on clique sur "Envoyer",high
+Question fonctionnalité,Comment utiliser la nouvelle fonction de tri ?,normal
+Correction mineure,Typo dans l'email automatique,low
+Incident critique,La base de données est corrompue,high

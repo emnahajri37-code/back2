@@ -13,17 +13,39 @@ priority_map = {
     "Billing": "low"
 }
 
+from auth_middleware import token_required   # ← import indispensable
+
 @ticket.route("/create", methods=["POST"])
 @token_required
 def create_ticket_route(current_user):
     data = request.json
     subject = data.get("subject", "")
     body = data.get("body", "")
-    ticket_type = ticket_model.predict([f"{subject} {body}"])[0]
-    priority = priority_map.get(ticket_type, "medium")
+    text = f"{subject} {body}".lower()
+    
+    # Détection de mots-clés pour priorité basse
+    if any(word in text for word in ["facture", "rembours", "billing", "paiement", "montant"]):
+        priority = "low"
+        ticket_type = "Billing"
+    elif any(word in text for word in ["produit", "panne", "casse"]):
+        priority = "medium"
+        ticket_type = "Product Support"
+    else:
+        # Fallback : modèle ou défaut
+        try:
+            ticket_type = ticket_model.predict([text])[0]
+            priority = priority_map.get(ticket_type, "medium")
+        except:
+            priority = "medium"
+            ticket_type = "unknown"
+    
     ticket_record = create_ticket(subject, body, priority, user_id=str(current_user["_id"]))
-    return jsonify({"message": "Ticket créé", "ticket": ticket_record})
-
+    return jsonify({
+        "message": "Ticket créé",
+        "ticket": ticket_record,
+        "priority": priority,
+        "type": ticket_type
+    })
 @ticket.route("/", methods=["GET"])
 @token_required
 def get_tickets_route(current_user):
