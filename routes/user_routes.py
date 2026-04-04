@@ -1,47 +1,59 @@
-from flask import Blueprint, request, jsonify
-from models.user_model import *
+from flask import Blueprint, request, jsonify, g
+from pymongo import MongoClient
+from bson.objectid import ObjectId
+from auth_middleware import token_required
 
 user = Blueprint("user", __name__)
-print("USER ROUTES LOADED")
 
+client = MongoClient("mongodb://localhost:27017/")
+db = client["pfe_db"]
+users_collection = db["users"]
+
+# ===========================
 # GET ALL USERS
-@user.route("/users", methods=["GET"])
-def get_users():
-    return jsonify(get_all_users())
+# ===========================
+@user.route("/", methods=["GET"])
+@token_required
+def get_users(current_user):
+    users = list(users_collection.find({}, {"password": 0}))  # ne pas renvoyer les mots de passe
+    for u in users:
+        u["_id"] = str(u["_id"])
+    return jsonify(users)
 
-# GET ONE USER
-@user.route("/users/<id>", methods=["GET"])
-def get_user_route(id):
-    user_data = get_user_by_id(id)
+# ===========================
+# GET USER BY ID
+# ===========================
+@user.route("/<user_id>", methods=["GET"])
+@token_required
+def get_user(current_user, user_id):
+    user_data = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
     if not user_data:
-        return jsonify({"error": "User not found"}), 404
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+    user_data["_id"] = str(user_data["_id"])
     return jsonify(user_data)
 
-# CREATE USER (POST)
-@user.route("/users", methods=["POST"])
-def create_user_route():
-    data = request.json
-    required_fields = ["name", "email", "password", "role"]
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"error": f"{field} is required"}), 400
-    create_user(data)
-    return jsonify({"message": "User created"})
-
+# ===========================
 # UPDATE USER
-@user.route("/users/<id>", methods=["PUT"])
-def update_user_route(id):
+# ===========================
+@user.route("/<user_id>", methods=["PUT"])
+@token_required
+def update_user(current_user, user_id):
     data = request.json
-    update_user(id, data)
-    return jsonify({"message": "User updated"})
+    if "password" in data:
+        from flask_bcrypt import generate_password_hash
+        data["password"] = generate_password_hash(data["password"]).decode('utf-8')
+    users_collection.update_one({"_id": ObjectId(user_id)}, {"$set": data})
+    user_updated = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
+    user_updated["_id"] = str(user_updated["_id"])
+    return jsonify({"message": "Utilisateur mis à jour", "user": user_updated})
 
+# ===========================
 # DELETE USER
-@user.route("/users/<id>", methods=["DELETE"])
-def delete_user_route(id):
-    delete_user(id)
-    return jsonify({"message": "User deleted"})
-
-# Route test blueprint
-@user.route("/test", methods=["GET"])
-def test_user():
-    return "User blueprint works!"
+# ===========================
+@user.route("/<user_id>", methods=["DELETE"])
+@token_required
+def delete_user(current_user, user_id):
+    result = users_collection.delete_one({"_id": ObjectId(user_id)})
+    if result.deleted_count:
+        return jsonify({"message": "Utilisateur supprimé"})
+    return jsonify({"error": "Utilisateur non trouvé"}), 404
