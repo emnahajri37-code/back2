@@ -1,60 +1,171 @@
-#!/usr/bin/env python3
+import pandas as pd
 import re
 import joblib
 import os
-import pandas as pd
-import numpy as np
+
+from datasets import load_dataset
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.pipeline import Pipeline
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import classification_report, accuracy_score
-from datasets import load_dataset
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import VotingClassifier
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.preprocessing import MaxAbsScaler
+
+print("🚀 Chargement du dataset...")
+
+# ==========================
+# LOAD DATA
+# ==========================
+
+if not os.path.exists("ticket.csv"):
+    print("📥 Téléchargement depuis Hugging Face...")
+
+    dataset = load_dataset("Tobi-Bueck/customer-support-tickets")
+    data = dataset["train"].to_pandas()
+
+    data = data[["subject", "body", "type"]]
+    data.to_csv("ticket.csv", index=False, encoding="utf-8")
+
+    print("✅ ticket.csv créé")
+else:
+    print("📂 ticket.csv déjà موجود")
+
+data = pd.read_csv("ticket.csv")
+
+# ==========================
+# CLEANING
+# ==========================
+
+data["subject"] = data["subject"].fillna("")
+data["body"] = data["body"].fillna("")
+data["type"] = data["type"].fillna("unknown")
+
+data = data.sample(frac=1, random_state=42)
+
+data["text"] = data["subject"] + " " + data["body"]
 
 def clean_text(text):
-    text = str(text).lower()
-    text = re.sub(r'[^a-z0-9\s]', '', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    text = text.lower()
+    text = re.sub(r"http\S+", "", text)
+    text = re.sub(r"\d+", "", text)
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
-def load_data_sample(sample_size=5000):
-    print(f"📥 Chargement d'un échantillon de {sample_size} tickets...")
-    dataset = load_dataset("Tobi-Bueck/customer-support-tickets", split="train")
-    df = dataset.to_pandas().sample(n=min(sample_size, len(dataset)), random_state=42)
-    df['subject'] = df['subject'].fillna('')
-    df['body'] = df['body'].fillna('')
-    df['text'] = (df['subject'] + " " + df['body']).apply(clean_text)
-    y = df['queue'].fillna('unknown')
-    X = df['text']
-    print("Distribution des classes :")
-    print(y.value_counts())
-    return X, y
+data["text"] = data["text"].apply(clean_text)
 
-def train_fast(X, y):
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    pipeline = Pipeline([
-        ('tfidf', TfidfVectorizer(max_features=5000, ngram_range=(1,2), stop_words='english')),
-        ('clf', LinearSVC(class_weight='balanced', dual='auto', max_iter=1000, random_state=42))
-    ])
-    print("🚀 Entraînement en cours... (max 30 secondes)")
-    pipeline.fit(X_train, y_train)
-    y_pred = pipeline.predict(X_test)
-    print(f"✅ Accuracy: {accuracy_score(y_test, y_pred):.2%}")
-    print(classification_report(y_test, y_pred, zero_division=0))
-    return pipeline
+# ==========================
+# SPLIT
+# ==========================
 
-if __name__ == "__main__":
-    X, y = load_data_sample(sample_size=5000)  # ← petit échantillon
-    model = train_fast(X, y)
-    os.makedirs("models", exist_ok=True)
-    joblib.dump(model, "models/ticket_model.pkl")
-    # Sauvegarde aussi le mapping priorité
-    priority_map = {
-        "Technical Support": "high",
-        "Product Support": "medium",
-        "Billing": "low",
-        "Account Management": "medium",
-        "General Inquiry": "low"
-    }
-    joblib.dump(priority_map, "models/priority_map.pkl")
-    print("✅ Modèle sauvegardé dans models/")
+X = data["text"]
+y = data["type"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# ==========================
+# TF-IDF
+# ==========================
+
+word_tfidf = TfidfVectorizer(
+    analyzer="word",
+    ngram_range=(1,3),
+    max_features=50000,
+    stop_words=None,
+    sublinear_tf=True,
+    min_df=2,
+    max_df=0.9
+)
+
+char_tfidf = TfidfVectorizer(
+    analyzer="char_wb",
+    ngram_range=(3,5),
+    max_features=30000,
+    sublinear_tf=True
+)
+
+# ==========================
+# MODELS
+# ==========================
+
+# Logistic Regression (stable)
+model_lr = LogisticRegression(
+    max_iter=5000,
+    class_weight="balanced",
+    C=5.0,
+    solver="saga"
+)
+
+# Linear SVM with calibration (no warning)
+svm = LinearSVC(
+    class_weight="balanced",
+    C=1.2
+)
+
+calibrated_svm = CalibratedClassifierCV(svm, method="sigmoid")
+
+# ==========================
+# PIPELINES
+# ==========================
+
+pipeline_word = Pipeline([
+    ("tfidf", word_tfidf),
+    ("scaler", MaxAbsScaler()),
+    ("clf", model_lr)
+])
+
+pipeline_char = Pipeline([
+    ("tfidf", char_tfidf),
+    ("clf", calibrated_svm)
+])
+
+# ==========================
+# ENSEMBLE
+# ==========================
+
+ensemble = VotingClassifier(
+    estimators=[
+        ("word_lr", pipeline_word),
+        ("char_svm", pipeline_char)
+    ],
+    voting="soft",
+    weights=[2, 3]
+)
+
+# ==========================
+# TRAINING
+# ==========================
+
+print("\n🔥 Entraînement...")
+ensemble.fit(X_train, y_train)
+print("✅ Terminé")
+
+# ==========================
+# EVALUATION
+# ==========================
+
+y_pred = ensemble.predict(X_test)
+
+accuracy = accuracy_score(y_test, y_pred)
+
+print("\n🎯 Accuracy:", accuracy)
+print("\n📊 Rapport:\n", classification_report(y_test, y_pred))
+
+# ==========================
+# SAVE MODEL
+# ==========================
+
+joblib.dump(ensemble, "model_pipeline.pkl")
+print("\n💾 Modèle sauvegardé")
+
+# ==========================
+# TEST
+# ==========================
+
+test_text = ["Server is down and not responding"]
+print("\n🚀 Test:", ensemble.predict(test_text))
