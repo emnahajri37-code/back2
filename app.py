@@ -45,19 +45,14 @@ def home():
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
-
-    # validation
-    if not data or "text" not in data:
-        return jsonify({"error": "Missing 'text' field"}), 400
-
     text = data["text"]
 
-    # prediction
     prediction = model.predict([text])[0]
 
-    return jsonify({
-        "prediction": prediction
-    })
+    print("TEXT:", text)
+    print("PREDICTION:", prediction)
+
+    return jsonify({"prediction": prediction})
 
 # ==========================
 # RUN SERVER

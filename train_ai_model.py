@@ -21,7 +21,7 @@ print("🚀 Chargement du dataset...")
 # ==========================
 
 if not os.path.exists("ticket.csv"):
-    print("📥 Téléchargement depuis Hugging Face...")
+    print("📥 Téléchargement dataset...")
 
     dataset = load_dataset("Tobi-Bueck/customer-support-tickets")
     data = dataset["train"].to_pandas()
@@ -31,7 +31,7 @@ if not os.path.exists("ticket.csv"):
 
     print("✅ ticket.csv créé")
 else:
-    print("📂 ticket.csv déjà موجود")
+    print("📂 ticket.csv déjà ")
 
 data = pd.read_csv("ticket.csv")
 
@@ -43,9 +43,11 @@ data["subject"] = data["subject"].fillna("")
 data["body"] = data["body"].fillna("")
 data["type"] = data["type"].fillna("unknown")
 
-data = data.sample(frac=1, random_state=42)
-
+# fusion texte
 data["text"] = data["subject"] + " " + data["body"]
+
+print("\n📊 Distribution des classes:")
+print(data["type"].value_counts())
 
 def clean_text(text):
     text = text.lower()
@@ -58,6 +60,16 @@ def clean_text(text):
 data["text"] = data["text"].apply(clean_text)
 
 # ==========================
+# (OPTIONNEL MAIS IMPORTANT) LIMITATION CLASSES TROP RARES
+# ==========================
+
+# garder uniquement classes fréquentes
+min_samples = 500
+value_counts = data["type"].value_counts()
+valid_classes = value_counts[value_counts >= min_samples].index
+data = data[data["type"].isin(valid_classes)]
+
+# ==========================
 # SPLIT
 # ==========================
 
@@ -65,7 +77,10 @@ X = data["text"]
 y = data["type"]
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
 )
 
 # ==========================
@@ -74,9 +89,8 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 word_tfidf = TfidfVectorizer(
     analyzer="word",
-    ngram_range=(1,3),
-    max_features=50000,
-    stop_words=None,
+    ngram_range=(1, 2),   # 🔥 réduit overfitting
+    max_features=30000,
     sublinear_tf=True,
     min_df=2,
     max_df=0.9
@@ -84,8 +98,8 @@ word_tfidf = TfidfVectorizer(
 
 char_tfidf = TfidfVectorizer(
     analyzer="char_wb",
-    ngram_range=(3,5),
-    max_features=30000,
+    ngram_range=(3, 5),
+    max_features=20000,
     sublinear_tf=True
 )
 
@@ -93,18 +107,16 @@ char_tfidf = TfidfVectorizer(
 # MODELS
 # ==========================
 
-# Logistic Regression (stable)
-model_lr = LogisticRegression(
-    max_iter=5000,
+log_reg = LogisticRegression(
+    max_iter=2000,
     class_weight="balanced",
-    C=5.0,
+    C=3.0,
     solver="saga"
 )
 
-# Linear SVM with calibration (no warning)
 svm = LinearSVC(
     class_weight="balanced",
-    C=1.2
+    C=1.0
 )
 
 calibrated_svm = CalibratedClassifierCV(svm, method="sigmoid")
@@ -116,7 +128,7 @@ calibrated_svm = CalibratedClassifierCV(svm, method="sigmoid")
 pipeline_word = Pipeline([
     ("tfidf", word_tfidf),
     ("scaler", MaxAbsScaler()),
-    ("clf", model_lr)
+    ("clf", log_reg)
 ])
 
 pipeline_char = Pipeline([
