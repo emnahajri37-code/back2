@@ -17,10 +17,32 @@ bcrypt = Bcrypt(app)
 CORS(app)
 
 # ==========================
-# LOAD MODEL
+# LOAD MODEL (pour prédire le type de ticket)
 # ==========================
 
-model = joblib.load("model_pipeline.pkl")
+model = joblib.load("model_pipeline.pkl")   # modèle existant (type de ticket)
+
+# ==========================
+# PRIORITY RULES (heuristique)
+# ==========================
+
+def get_priority_from_text(text: str) -> str:
+    text_lower = text.lower()
+    high_keywords = [
+        "urgent", "asap", "critical", "blocking", "emergency",
+        "down", "outage", "not working", "broken", "crash",
+        "data loss", "security breach", "immediately"
+    ]
+    low_keywords = [
+        "low priority", "not urgent", "when possible", "suggestion",
+        "minor issue", "cosmetic", "nice to have", "eventually"
+    ]
+    if any(kw in text_lower for kw in high_keywords):
+        return "high"
+    elif any(kw in text_lower for kw in low_keywords):
+        return "low"
+    else:
+        return "medium"
 
 # ==========================
 # REGISTER BLUEPRINTS
@@ -39,25 +61,30 @@ def home():
     return "Bienvenue sur le backend"
 
 # ==========================
-# PREDICT ROUTE
+# PREDICT ROUTE (type de ticket)
 # ==========================
 
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
-
-    # validation
     if not data or "text" not in data:
         return jsonify({"error": "Missing 'text' field"}), 400
-
     text = data["text"]
-
-    # prediction
     prediction = model.predict([text])[0]
+    return jsonify({"prediction": prediction})
 
-    return jsonify({
-        "prediction": prediction
-    })
+# ==========================
+# PREDICT PRIORITY ROUTE (heuristique)
+# ==========================
+
+@app.route("/predict_priority", methods=["POST"])
+def predict_priority():
+    data = request.get_json()
+    if not data or "text" not in data:
+        return jsonify({"error": "Missing 'text' field"}), 400
+    text = data["text"]
+    priority = get_priority_from_text(text)
+    return jsonify({"priority": priority})
 
 # ==========================
 # RUN SERVER

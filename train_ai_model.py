@@ -1,171 +1,77 @@
 import pandas as pd
 import re
 import joblib
-import os
-
-from datasets import load_dataset
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.pipeline import Pipeline
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import VotingClassifier
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.preprocessing import MaxAbsScaler
+from sklearn.preprocessing import LabelEncoder
+import warnings
+warnings.filterwarnings('ignore')
 
-print("🚀 Chargement du dataset...")
+# Charger le dataset
+data = pd.read_csv("ticket.csv")  # colonnes: subject, body, type
 
-# ==========================
-# LOAD DATA
-# ==========================
-
-if not os.path.exists("ticket.csv"):
-    print("📥 Téléchargement depuis Hugging Face...")
-
-    dataset = load_dataset("Tobi-Bueck/customer-support-tickets")
-    data = dataset["train"].to_pandas()
-
-    data = data[["subject", "body", "type"]]
-    data.to_csv("ticket.csv", index=False, encoding="utf-8")
-
-    print("✅ ticket.csv créé")
-else:
-    print("📂 ticket.csv déjà موجود")
-
-data = pd.read_csv("ticket.csv")
-
-# ==========================
-# CLEANING
-# ==========================
-
+# Nettoyage et création du texte
 data["subject"] = data["subject"].fillna("")
 data["body"] = data["body"].fillna("")
-data["type"] = data["type"].fillna("unknown")
-
-data = data.sample(frac=1, random_state=42)
-
 data["text"] = data["subject"] + " " + data["body"]
 
 def clean_text(text):
     text = text.lower()
-    text = re.sub(r"http\S+", "", text)
-    text = re.sub(r"\d+", "", text)
-    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"[^a-z\s]", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 data["text"] = data["text"].apply(clean_text)
 
-# ==========================
-# SPLIT
-# ==========================
+# === CRÉATION ARTIFICIELLE DE LA PRIORITÉ À PARTIR DE RÈGLES ===
+def assign_priority(text):
+    text_lower = text.lower()
+    high = ["urgent", "asap", "critical", "blocking", "emergency", "down", "outage"]
+    low  = ["low priority", "not urgent", "suggestion", "minor"]
+    if any(kw in text_lower for kw in high):
+        return "high"
+    elif any(kw in text_lower for kw in low):
+        return "low"
+    else:
+        return "medium"
 
-X = data["text"]
-y = data["type"]
+data["priority"] = data["text"].apply(assign_priority)
+
+# Afficher la distribution
+print("Distribution des priorités créées :")
+print(data["priority"].value_counts())
+
+# Encodage des labels
+le = LabelEncoder()
+y = le.fit_transform(data["priority"])
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
+    data["text"], y, test_size=0.2, random_state=42, stratify=y
 )
 
-# ==========================
 # TF-IDF
-# ==========================
-
-word_tfidf = TfidfVectorizer(
-    analyzer="word",
-    ngram_range=(1,3),
-    max_features=50000,
-    stop_words=None,
-    sublinear_tf=True,
-    min_df=2,
-    max_df=0.9
-)
-
-char_tfidf = TfidfVectorizer(
-    analyzer="char_wb",
-    ngram_range=(3,5),
-    max_features=30000,
+vectorizer = TfidfVectorizer(
+    stop_words="english",
+    ngram_range=(1, 2),
+    max_features=15000,
     sublinear_tf=True
 )
 
-# ==========================
-# MODELS
-# ==========================
+X_train_vec = vectorizer.fit_transform(X_train)
+X_test_vec = vectorizer.transform(X_test)
 
-# Logistic Regression (stable)
-model_lr = LogisticRegression(
-    max_iter=5000,
-    class_weight="balanced",
-    C=5.0,
-    solver="saga"
-)
+# Modèle
+model = LogisticRegression(class_weight="balanced", C=1.0, max_iter=1000)
+model.fit(X_train_vec, y_train)
 
-# Linear SVM with calibration (no warning)
-svm = LinearSVC(
-    class_weight="balanced",
-    C=1.2
-)
+# Évaluation (le modèle devrait être quasi parfait car il apprend les règles)
+y_pred = model.predict(X_test_vec)
+accuracy = (y_test == y_pred).mean()
+print(f"Accuracy du modèle (sur règles) : {accuracy:.4f}")
 
-calibrated_svm = CalibratedClassifierCV(svm, method="sigmoid")
-
-# ==========================
-# PIPELINES
-# ==========================
-
-pipeline_word = Pipeline([
-    ("tfidf", word_tfidf),
-    ("scaler", MaxAbsScaler()),
-    ("clf", model_lr)
-])
-
-pipeline_char = Pipeline([
-    ("tfidf", char_tfidf),
-    ("clf", calibrated_svm)
-])
-
-# ==========================
-# ENSEMBLE
-# ==========================
-
-ensemble = VotingClassifier(
-    estimators=[
-        ("word_lr", pipeline_word),
-        ("char_svm", pipeline_char)
-    ],
-    voting="soft",
-    weights=[2, 3]
-)
-
-# ==========================
-# TRAINING
-# ==========================
-
-print("\n🔥 Entraînement...")
-ensemble.fit(X_train, y_train)
-print("✅ Terminé")
-
-# ==========================
-# EVALUATION
-# ==========================
-
-y_pred = ensemble.predict(X_test)
-
-accuracy = accuracy_score(y_test, y_pred)
-
-print("\n🎯 Accuracy:", accuracy)
-print("\n📊 Rapport:\n", classification_report(y_test, y_pred))
-
-# ==========================
-# SAVE MODEL
-# ==========================
-
-joblib.dump(ensemble, "model_pipeline.pkl")
-print("\n💾 Modèle sauvegardé")
-
-# ==========================
-# TEST
-# ==========================
-
-test_text = ["Server is down and not responding"]
-print("\n🚀 Test:", ensemble.predict(test_text))
+# Sauvegarde
+joblib.dump(model, "priority_model.pkl")
+joblib.dump(vectorizer, "priority_vectorizer.pkl")
+joblib.dump(le, "priority_label_encoder.pkl")
+print("✅ Modèle priorité sauvegardé.")
