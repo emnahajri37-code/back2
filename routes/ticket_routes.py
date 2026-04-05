@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 import joblib
 from models.ticket_db import create_ticket, get_all_tickets, get_ticket_by_id, update_ticket, delete_ticket
 from auth_middleware import token_required
+import datetime
 
 ticket = Blueprint("ticket", __name__)
 
@@ -68,7 +69,30 @@ def update_ticket_route(current_user, ticket_id):
     if updated_ticket:
         return jsonify({"message": "Ticket mis à jour", "ticket": updated_ticket})
     return jsonify({"error": "Ticket non trouvé"}), 404
+@ticket.route("/<ticket_id>/priority", methods=["PATCH"])
+@token_required
+def update_ticket_priority(current_user, ticket_id):
+    data = request.json
+    new_priority = data.get("priority")
+    if new_priority not in ["low", "medium", "high"]:
+        return jsonify({"error": "Priority must be low, medium or high"}), 400
 
+    # Récupérer le ticket existant
+    ticket = get_ticket_by_id(ticket_id)
+    if not ticket:
+        return jsonify({"error": "Ticket not found"}), 404
+
+    # Mise à jour avec un champ indiquant que c'est manuel
+    update_data = {
+        "priority": new_priority,
+        "priority_manual_override": True,
+        "priority_updated_at": datetime.datetime.utcnow().isoformat()
+    }
+    updated = update_ticket(ticket_id, update_data)
+    return jsonify({
+        "message": "Priority updated manually",
+        "ticket": updated
+    })
 @ticket.route("/<ticket_id>", methods=["DELETE"])
 @token_required
 def delete_ticket_route(current_user, ticket_id):
