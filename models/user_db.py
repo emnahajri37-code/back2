@@ -23,3 +23,5 @@ def check_password(plain_password, hashed_password):
     if not hashed_password:
         return False
     return bcrypt.check_password_hash(hashed_password, plain_password)
+def update_user_password(email, hashed_password):
+    users_collection.update_one({"email": email}, {"$set": {"password": hashed_password}})
