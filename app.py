@@ -67,18 +67,15 @@ def home():
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
-<<<<<<< HEAD
     if not data or "text" not in data:
         return jsonify({"error": "Missing 'text' field"}), 400
     text = data["text"]
-=======
+
     text = data["text"]
 
->>>>>>> eede3ffe8f73a2713431e8997e005dd09652e46b
     prediction = model.predict([text])[0]
     return jsonify({"prediction": prediction})
 
-<<<<<<< HEAD
 # ==========================
 # PREDICT PRIORITY ROUTE (heuristique)
 # ==========================
@@ -91,12 +88,11 @@ def predict_priority():
     text = data["text"]
     priority = get_priority_from_text(text)
     return jsonify({"priority": priority})
-=======
+
     print("TEXT:", text)
     print("PREDICTION:", prediction)
 
     return jsonify({"prediction": prediction})
->>>>>>> eede3ffe8f73a2713431e8997e005dd09652e46b
 
 # ==========================
 # RUN SERVER
