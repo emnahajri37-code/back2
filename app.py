@@ -31,10 +31,9 @@ app.config['MAIL_USERNAME'] = "emnasellami18@gmail.com"
 app.config['MAIL_PASSWORD'] = "kdhvvvtxpmoygkrg"
 app.config['MAIL_DEFAULT_SENDER'] = "emnasellami18@gmail.com"
 
-
 # Initialisation des extensions
 bcrypt = Bcrypt(app)
-CORS(app)
+CORS(app)  # ✅ Déjà présent, c'est bon
 mail = Mail(app)
 
 # Rendre l'instance mail accessible dans les blueprints
@@ -69,7 +68,7 @@ def get_priority_from_text(text: str) -> str:
 # ==========================
 # REGISTER BLUEPRINTS
 # ==========================
-app.register_blueprint(auth, url_prefix="/auth")
+app.register_blueprint(auth, url_prefix="/auth")  # ← Inchangé (fonctionne avec /auth)
 app.register_blueprint(user, url_prefix="/user")
 app.register_blueprint(ticket, url_prefix="/tickets")
 
@@ -89,12 +88,6 @@ def predict():
     if not data or "text" not in data:
         return jsonify({"error": "Missing 'text' field"}), 400
     text = data["text"]
-<<<<<<< HEAD
-
-    text = data["text"]
-
-=======
->>>>>>> 000cf86cf891a3f681d6278826ccde970c4baa65
     prediction = model.predict([text])[0]
     return jsonify({"prediction": prediction})
 
@@ -109,14 +102,6 @@ def predict_priority():
     text = data["text"]
     priority = get_priority_from_text(text)
     return jsonify({"priority": priority})
-<<<<<<< HEAD
-
-    print("TEXT:", text)
-    print("PREDICTION:", prediction)
-
-    return jsonify({"prediction": prediction})
-=======
->>>>>>> 000cf86cf891a3f681d6278826ccde970c4baa65
 
 # ==========================
 # RUN SERVER
