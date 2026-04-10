@@ -44,6 +44,21 @@ def update_user_password(email, hashed_password):
 # ===========================
 # CRUD UTILISATEURS
 # ===========================
+
+# ⚠️ ROUTE PROFIL (à garder UNE SEULE FOIS)
+@user.route("/profile", methods=["GET"])
+@token_required
+def get_my_profile(current_user):
+    """Récupère le profil de l'utilisateur connecté"""
+    try:
+        user_data = users_collection.find_one({"_id": ObjectId(current_user["_id"])}, {"password": 0})
+        if not user_data:
+            return jsonify({"error": "Utilisateur non trouvé"}), 404
+        user_data["_id"] = str(user_data["_id"])
+        return jsonify(user_data), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @user.route("/", methods=["GET"])
 @token_required
 def get_users(current_user):
@@ -92,7 +107,6 @@ def forgot_password():
 
     user = users_collection.find_one({"email": email})
     if not user:
-        # Sécurité : ne pas révéler si l'email existe
         return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
     token = generate_reset_token(email)
