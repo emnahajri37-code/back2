@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 import joblib
 from models.ticket_db import create_ticket, get_tickets_by_user, get_ticket_by_id, update_ticket, delete_ticket
 from auth_middleware import token_required
+from models.ticket_db import get_all_tickets 
 import datetime
 
 ticket = Blueprint("ticket", __name__)
@@ -96,3 +97,13 @@ def delete_ticket_route(current_user, ticket_id):
     if not ticket_record or ticket_record.get("user_id") != str(current_user["_id"]):
         return jsonify({"error": "Non autorisé"}), 403
     return jsonify(delete_ticket(ticket_id))
+ # Ajouter en haut du fichier
+
+@ticket.route("/all", methods=["GET"])
+@token_required
+def get_all_tickets_for_it(current_user):
+    """Retourne tous les tickets (réservé aux IT Consultants)"""
+    if current_user.get("role") not in ["it_consultant", "it"]:
+        return jsonify({"error": "Accès non autorisé"}), 403
+    tickets = get_all_tickets()  # ← utilise la fonction définie dans ticket_db
+    return jsonify(tickets), 200
