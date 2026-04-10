@@ -60,7 +60,7 @@ def login():
 
     token = jwt.encode({
         "user_id": user["_id"],
-        "role": user.get("role", "it_consultant"),
+        "role": user.get("role", "it_consultant"),  # ← le rôle est bien présent
         "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
     }, SECRET_KEY, algorithm="HS256")
 
@@ -68,9 +68,8 @@ def login():
     return jsonify({
         "message": "Connexion réussie",
         "token": token,
-        "user": user
+        "user": user          # ← user contient le champ "role"
     }), 200
-
 # ========== GOOGLE AUTH (inchangé) ==========
 @auth.route("/google", methods=["POST"])
 def google_login():
