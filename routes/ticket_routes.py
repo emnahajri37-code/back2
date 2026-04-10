@@ -13,7 +13,6 @@ priority_map = {
     "Product Support": "medium",
     "Billing": "low"
 }
-
 @ticket.route("/create", methods=["POST"])
 @token_required
 def create_ticket_route(current_user):
