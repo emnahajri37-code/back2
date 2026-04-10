@@ -15,11 +15,12 @@ def create_user(email, hashed_password, name, role="it_consultant"):
         "password": hashed_password,
         "name": name,
         "role": role,
-        "created_at": datetime.utcnow()
+        "created_at": datetime.datetime.utcnow() 
     }
     result = users_collection.insert_one(user)
     user["_id"] = str(result.inserted_id)
     return user
+
 
 def find_user_by_email(email):
     user = users_collection.find_one({"email": email})
