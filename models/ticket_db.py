@@ -6,17 +6,26 @@ client = MongoClient("mongodb://localhost:27017/")
 db = client["pfe_db"]
 tickets_collection = db["tickets"]
 
-def create_ticket(subject, body, priority, user_id=None):
+def create_ticket(subject, body, priority, user_id, type_personnalise="unknown"):
     ticket = {
-        "subject": subject,
-        "body": body,
-        "priority": priority,
+        "titre": subject,
+        "description": body,
+        "priorite": priority,
         "user_id": user_id,
-        "created_at": datetime.datetime.utcnow()
+        "type_personnalise": type_personnalise,
+        "status": "En attente",
+        "dateCreation": datetime.datetime.utcnow().isoformat(),
+        "scoreConfiance": 0.75
     }
     result = tickets_collection.insert_one(ticket)
     ticket["_id"] = str(result.inserted_id)
     return ticket
+
+def get_tickets_by_user(user_id):
+    tickets = list(tickets_collection.find({"user_id": user_id}))
+    for t in tickets:
+        t["_id"] = str(t["_id"])
+    return tickets
 
 def get_all_tickets():
     tickets = list(tickets_collection.find())
@@ -36,6 +45,4 @@ def update_ticket(ticket_id, data):
 
 def delete_ticket(ticket_id):
     result = tickets_collection.delete_one({"_id": ObjectId(ticket_id)})
-    if result.deleted_count:
-        return {"message": "Ticket supprimé"}
-    return {"error": "Ticket non trouvé"}
+    return {"deleted": result.deleted_count > 0}
