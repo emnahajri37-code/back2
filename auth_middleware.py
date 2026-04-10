@@ -33,7 +33,6 @@ def token_required(f):
             if not user:
                 return jsonify({"message": "Utilisateur introuvable"}), 401
 
-            # Ajouter explicitement le champ 'role' s'il manque
             if "role" not in user:
                 user["role"] = "it_consultant"
 
