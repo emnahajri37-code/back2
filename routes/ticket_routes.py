@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 import joblib
-from models.ticket_db import create_ticket, get_tickets_by_user, get_ticket_by_id, update_ticket, delete_ticket, get_all_tickets
+from models.ticket_db import create_ticket, get_tickets_by_user, get_ticket_by_id, update_ticket, delete_ticket
 from auth_middleware import token_required
 import datetime
 
@@ -19,9 +19,9 @@ def create_ticket_route(current_user):
     data = request.json
     subject = data.get("subject", "")
     body = data.get("body", "")
+    type_personnalise = data.get("type_personnalise", "")
     text = f"{subject} {body}".lower()
     
-    # détection priorité (inchangée)
     if any(word in text for word in ["facture", "rembours", "billing", "paiement", "montant"]):
         priority = "low"
         ticket_type = "Billing"
@@ -39,7 +39,7 @@ def create_ticket_route(current_user):
     ticket_record = create_ticket(
         subject, body, priority,
         user_id=str(current_user["_id"]),
-        type_personnalise=ticket_type
+        type_personnalise=type_personnalise or ticket_type
     )
     return jsonify({
         "message": "Ticket créé",
@@ -51,15 +51,6 @@ def create_ticket_route(current_user):
 @ticket.route("/my", methods=["GET"])
 @token_required
 def get_my_tickets(current_user):
-    """Récupère uniquement les tickets de l'utilisateur connecté"""
-    tickets = get_tickets_by_user(str(current_user["_id"]))
-    return jsonify(tickets)
-
-@ticket.route("/", methods=["GET"])
-@token_required
-def get_all_tickets_route(current_user):
-    # Seul un admin (ou role particulier) pourrait voir tous les tickets
-    # Ici on retourne les siens pour la démo
     tickets = get_tickets_by_user(str(current_user["_id"]))
     return jsonify(tickets)
 

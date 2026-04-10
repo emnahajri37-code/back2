@@ -27,12 +27,6 @@ def get_tickets_by_user(user_id):
         t["_id"] = str(t["_id"])
     return tickets
 
-def get_all_tickets():
-    tickets = list(tickets_collection.find())
-    for t in tickets:
-        t["_id"] = str(t["_id"])
-    return tickets
-
 def get_ticket_by_id(ticket_id):
     ticket = tickets_collection.find_one({"_id": ObjectId(ticket_id)})
     if ticket:

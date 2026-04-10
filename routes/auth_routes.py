@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from models.user_db import create_user, find_user_by_email, check_password, bcrypt
+from models.user_db import create_user, find_user_by_email, check_password
 import jwt
 import datetime
 import re
@@ -7,9 +7,11 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from config.db import GOOGLE_CLIENT_ID
 from models import user_db as user_model
+from flask_bcrypt import Bcrypt
 
 auth = Blueprint("auth", __name__)
 SECRET_KEY = "secret123"
+bcrypt = Bcrypt()  # utilisé uniquement pour générer le hash lors de l'inscription
 
 @auth.route("/signup", methods=["POST"])
 def signup():
@@ -17,7 +19,7 @@ def signup():
     email = data.get("email")
     password = data.get("password")
     name = data.get("name")
-    role = data.get("role", "it_consultant")   # ← récupérer le rôle
+    role = data.get("role", "it_consultant")
 
     if not email or not password or not name:
         return jsonify({"error": "Email, password et name requis"}), 400
@@ -25,7 +27,6 @@ def signup():
     if find_user_by_email(email):
         return jsonify({"error": "Email déjà utilisé"}), 400
 
-    # validation mot de passe (identique à avant)
     if len(password) < 6:
         return jsonify({"error": "Le mot de passe doit contenir au moins 6 caractères"}), 400
     if not re.search(r"[A-Z]", password):
@@ -70,68 +71,47 @@ def login():
         "user": user
     }), 200
 
-
-
-# ========== NOUVEAUX ENDPOINTS POUR GOOGLE AUTH ==========
-
+# ========== GOOGLE AUTH (inchangé) ==========
 @auth.route("/google", methods=["POST"])
 def google_login():
-    """Endpoint pour l'authentification Google"""
     try:
-        # 1. Récupérer le token du frontend
         data = request.get_json()
         id_token_str = data.get('id_token')
-        
         if not id_token_str:
             return jsonify({"error": "Token manquant"}), 400
-        
-        # 2. Vérifier le token avec Google
         try:
             info = id_token.verify_oauth2_token(
                 id_token_str, 
                 google_requests.Request(), 
                 GOOGLE_CLIENT_ID
             )
-            
-            # Vérifier que c'est bien Google
             if info['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
                 return jsonify({"error": "Token invalide"}), 401
-                
         except ValueError as e:
             return jsonify({"error": f"Token invalide: {str(e)}"}), 401
         
-        # 3. Extraire les infos utilisateur
         google_id = info.get('sub')
         email = info.get('email')
         name = info.get('name')
         picture = info.get('picture')
-        
         print(f"🔍 Tentative de connexion Google: {email}")
         
-        # 4. Chercher ou créer l'utilisateur
         user = user_model.find_user_by_google_id(google_id)
-        
         if not user:
-            # Vérifier si l'email existe déjà (compte créé normalement)
             user = user_model.find_user_by_email_for_google(email)
-            
             if user:
-                # Lier le compte Google au compte existant
                 print(f"🔗 Liaison du compte Google avec l'utilisateur existant: {email}")
                 user_model.link_google_account(email, google_id)
                 user['google_id'] = google_id
             else:
-                # Créer un nouvel utilisateur
                 print(f"✨ Création d'un nouvel utilisateur Google: {email}")
                 user = user_model.create_google_user(google_id, email, name, picture)
         
-        # 5. Générer un token JWT (comme pour le login normal)
         token = jwt.encode({
             "user_id": user['_id'],
             "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
         }, SECRET_KEY, algorithm="HS256")
         
-        # 6. Retourner la réponse
         return jsonify({
             "success": True,
             "message": "Connexion Google réussie",
@@ -143,93 +123,80 @@ def google_login():
                 "picture": user.get('picture', '')
             }
         }), 200
-        
     except Exception as e:
         print(f"❌ Erreur: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-
 @auth.route("/google/config", methods=["GET"])
 def google_config():
-    """Endpoint pour récupérer le client_id (utile pour le frontend)"""
-    return jsonify({
-        "client_id": GOOGLE_CLIENT_ID
-    })
+    return jsonify({"client_id": GOOGLE_CLIENT_ID})
+
 @auth.route("/google/callback", methods=["GET"])
 def google_callback():
-    """Page qui extrait le token du fragment et le montre à l'utilisateur"""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Connexion Google - Token reçu</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 40px; }
-            .token { background: #f0f0f0; padding: 10px; word-break: break-all; font-family: monospace; }
-            button { background: #4CAF50; color: white; padding: 10px 20px; border: none; cursor: pointer; margin-top: 20px; }
-            .success { color: green; }
-            .error { color: red; }
-        </style>
-    </head>
-    <body>
-        <h1>🔄 Traitement de la connexion Google...</h1>
-        <div id="status">Extraction du token en cours...</div>
-        
-        <script>
-            // Extraire le token de l'URL fragment (#)
-            const hash = window.location.hash.substring(1);
-            const params = new URLSearchParams(hash);
-            const id_token = params.get('id_token');
-            
-            if (id_token) {
-                document.getElementById('status').innerHTML = `
-                    <p class="success">✅ Token reçu avec succès !</p>
-                    <p><strong>Token :</strong></p>
-                    <div class="token">${id_token}</div>
-                    <p>📋 Copiez ce token et testez-le dans Postman :</p>
-                    <p><code>POST http://localhost:5000/auth/google</code></p>
-                    <p><code>Content-Type: application/json</code></p>
-                    <p><code>{"id_token": "LE_TOKEN_CI_DESSUS"}</code></p>
-                    <button onclick="copyToken()">📋 Copier le token</button>
-                `;
-                
-                // Envoyer automatiquement au backend
-                fetch('http://localhost:5000/auth/google', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({id_token: id_token})
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        document.getElementById('status').innerHTML += `
-                            <p class="success">✅ Connexion réussie !</p>
-                            <pre>${JSON.stringify(data, null, 2)}</pre>
-                        `;
-                    } else {
-                        document.getElementById('status').innerHTML += `
-                            <p class="error">❌ Erreur: ${data.error}</p>
-                        `;
-                    }
-                })
-                .catch(err => {
+    return """<!DOCTYPE html>
+<html>
+<head>
+    <title>Connexion Google - Token reçu</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .token { background: #f0f0f0; padding: 10px; word-break: break-all; font-family: monospace; }
+        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; cursor: pointer; margin-top: 20px; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>🔄 Traitement de la connexion Google...</h1>
+    <div id="status">Extraction du token en cours...</div>
+    <script>
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const id_token = params.get('id_token');
+        if (id_token) {
+            document.getElementById('status').innerHTML = `
+                <p class="success">✅ Token reçu avec succès !</p>
+                <p><strong>Token :</strong></p>
+                <div class="token">${id_token}</div>
+                <p>📋 Copiez ce token et testez-le dans Postman :</p>
+                <p><code>POST http://localhost:5000/auth/google</code></p>
+                <p><code>Content-Type: application/json</code></p>
+                <p><code>{"id_token": "LE_TOKEN_CI_DESSUS"}</code></p>
+                <button onclick="copyToken()">📋 Copier le token</button>
+            `;
+            fetch('http://localhost:5000/auth/google', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id_token: id_token})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
                     document.getElementById('status').innerHTML += `
-                        <p class="error">❌ Erreur lors de l'envoi: ${err.message}</p>
+                        <p class="success">✅ Connexion réussie !</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
                     `;
-                });
-            } else {
-                document.getElementById('status').innerHTML = `
-                    <p class="error">❌ Aucun token trouvé dans l'URL</p>
-                    <p>Assurez-vous de vous connecter correctement.</p>
+                } else {
+                    document.getElementById('status').innerHTML += `
+                        <p class="error">❌ Erreur: ${data.error}</p>
+                    `;
+                }
+            })
+            .catch(err => {
+                document.getElementById('status').innerHTML += `
+                    <p class="error">❌ Erreur lors de l'envoi: ${err.message}</p>
                 `;
-            }
-            
-            function copyToken() {
-                const token = document.querySelector('.token').textContent;
-                navigator.clipboard.writeText(token);
-                alert('Token copié dans le presse-papier !');
-            }
-        </script>
-    </body>
-    </html>
-    """
+            });
+        } else {
+            document.getElementById('status').innerHTML = `
+                <p class="error">❌ Aucun token trouvé dans l'URL</p>
+                <p>Assurez-vous de vous connecter correctement.</p>
+            `;
+        }
+        function copyToken() {
+            const token = document.querySelector('.token').textContent;
+            navigator.clipboard.writeText(token);
+            alert('Token copié dans le presse-papier !');
+        }
+    </script>
+</body>
+</html>"""
