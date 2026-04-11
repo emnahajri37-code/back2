@@ -111,7 +111,7 @@ def forgot_password():
 
     token = generate_reset_token(email)
     print(f"\n🔑 TOKEN DE RÉINITIALISATION : {token}\n")
-    base_url = current_app.config.get('BASE_URL', 'http://localhost:5000')
+    base_url = current_app.config.get('BASE_URL', 'http://localhost:3000')
     reset_link = f"{base_url}/reset-password?token={token}"
 
     try:
