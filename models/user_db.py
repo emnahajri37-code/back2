@@ -42,13 +42,13 @@ def find_user_by_email_for_google(email):
 def link_google_account(email, google_id):
     users_collection.update_one({"email": email}, {"$set": {"google_id": google_id}})
 
-def create_google_user(google_id, email, name, picture):
+def create_google_user(google_id, email, name, picture, role="it_consultant"):
     user = {
         "email": email,
         "name": name,
         "picture": picture,
         "google_id": google_id,
-        "role": "it_consultant",
+        "role": role,
         "created_at": datetime.datetime.utcnow()
     }
     result = users_collection.insert_one(user)

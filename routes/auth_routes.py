@@ -60,7 +60,7 @@ def login():
 
     token = jwt.encode({
         "user_id": user["_id"],
-        "role": user.get("role", "it_consultant"),  # ← le rôle est bien présent
+        "role": user.get("role", "it_consultant"),
         "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
     }, SECRET_KEY, algorithm="HS256")
 
@@ -68,14 +68,17 @@ def login():
     return jsonify({
         "message": "Connexion réussie",
         "token": token,
-        "user": user          # ← user contient le champ "role"
+        "user": user
     }), 200
-# ========== GOOGLE AUTH (inchangé) ==========
+
+# ========== GOOGLE AUTH ==========
 @auth.route("/google", methods=["POST"])
 def google_login():
     try:
         data = request.get_json()
         id_token_str = data.get('id_token')
+        role_requested = data.get('role', 'it_consultant')  # ⭐ Rôle demandé par le frontend
+        
         if not id_token_str:
             return jsonify({"error": "Token manquant"}), 400
         try:
@@ -93,34 +96,43 @@ def google_login():
         email = info.get('email')
         name = info.get('name')
         picture = info.get('picture')
-        print(f"🔍 Tentative de connexion Google: {email}")
+        print(f"🔍 Tentative de connexion Google: {email} (rôle demandé: {role_requested})")
         
-        user = user_model.find_user_by_google_id(google_id)
-        if not user:
-            user = user_model.find_user_by_email_for_google(email)
-            if user:
-                print(f"🔗 Liaison du compte Google avec l'utilisateur existant: {email}")
-                user_model.link_google_account(email, google_id)
-                user['google_id'] = google_id
-            else:
-                print(f"✨ Création d'un nouvel utilisateur Google: {email}")
-                user = user_model.create_google_user(google_id, email, name, picture)
+        # Vérifier si l'utilisateur existe déjà
+        user = user_model.find_user_by_email_for_google(email)
+        
+        if user:
+            # ⭐ Si l'utilisateur existe, vérifier que le rôle correspond
+            user_role = user.get('role', 'it_consultant')
+            if user_role != role_requested:
+                return jsonify({
+                    "error": f"Cet email est déjà utilisé avec un compte {user_role}. Veuillez utiliser l'autre page de connexion."
+                }), 409
+        else:
+            # Créer un nouvel utilisateur avec le rôle demandé
+            print(f"✨ Création d'un nouvel utilisateur Google: {email} avec rôle {role_requested}")
+            user = user_model.create_google_user(google_id, email, name, picture, role_requested)
         
         token = jwt.encode({
             "user_id": user['_id'],
+            "role": user.get('role', role_requested),
             "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
         }, SECRET_KEY, algorithm="HS256")
+        
+        # Retourner l'utilisateur avec son rôle
+        user_for_response = {
+            "id": user['_id'],
+            "email": user['email'],
+            "name": user.get('name'),
+            "picture": user.get('picture', ''),
+            "role": user.get('role', role_requested)
+        }
         
         return jsonify({
             "success": True,
             "message": "Connexion Google réussie",
             "token": token,
-            "user": {
-                "id": user['_id'],
-                "email": user['email'],
-                "name": user.get('name'),
-                "picture": user.get('picture', '')
-            }
+            "user": user_for_response
         }), 200
     except Exception as e:
         print(f"❌ Erreur: {str(e)}")
