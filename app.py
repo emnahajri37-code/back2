@@ -19,7 +19,7 @@ app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
 app.config['MAIL_USERNAME'] = "ticketsystempfe@gmail.com"
 app.config['MAIL_PASSWORD'] = "uiobnsjfeqcvetou"
-app.config['MAIL_DEFAULT_SENDER'] = "emnasellami18@gmail.com"
+app.config['MAIL_DEFAULT_SENDER'] = "ticketsystempfe@gmail.com"
 
 bcrypt = Bcrypt(app)
 mail = Mail(app)
