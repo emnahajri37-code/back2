@@ -144,21 +144,33 @@ def delete_ticket_route(current_user, ticket_id):
 # ==================== ROUTE POUR L'ANALYSE IA ====================
 @ticket.route("/predict", methods=["POST"])
 def predict_route():
-    data = request.get_json()
-    if not data or "text" not in data:
-        return jsonify({"error": "Missing 'text' field"}), 400
-    text = data["text"]
-    cleaned = clean_text(text)
-    if priority_model is None:
-        return jsonify({"prediction": "Moyenne", "confidence": 0.75})
     try:
+        data = request.get_json()
+        if not data or "text" not in data:
+            return jsonify({"error": "Missing 'text' field"}), 400
+        
+        text = data["text"]
+        cleaned = clean_text(text)
+        
+        if priority_model is None:
+            return jsonify({"prediction": "Moyenne", "confidence": 0.75})
+        
         X = priority_vectorizer.transform([cleaned])
         proba = priority_model.predict_proba(X)[0]
         confidence = float(max(proba))
         predicted_class = priority_model.predict(X)[0]
         category = priority_label_encoder.inverse_transform([predicted_class])[0]
+        
         category_map = {"high": "Haute", "medium": "Moyenne", "low": "Basse"}
         display_category = category_map.get(category, category)
+        
+        # Ajustement doux de la confiance (optionnel)
+        if confidence < 0.5:
+            confidence = 0.5 + (0.5 - confidence) * 0.3
+        confidence = min(confidence, 0.95)
+        confidence = round(confidence, 2)
+        
         return jsonify({"prediction": display_category, "confidence": confidence})
     except Exception as e:
+        print(f"Erreur dans predict_route: {str(e)}")
         return jsonify({"error": str(e)}), 500
