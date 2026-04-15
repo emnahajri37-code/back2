@@ -87,24 +87,35 @@ def login():
     data = request.json
     email = data.get("email")
     password = data.get("password")
+    role_requested = data.get("role")  # 🔥 IMPORTANT
 
     if not email or not password:
         return jsonify({"error": "Email et password requis"}), 400
 
     user = find_user_by_email(email)
+
     if not user or not check_password(password, user.get("password", "")):
         return jsonify({"error": "Email ou mot de passe incorrect"}), 401
 
+    # 🔥 BLOQUER SI ROLE DIFFERENT
+    if role_requested and user.get("role") != role_requested:
+        return jsonify({
+            "error": f"Ce compte est un compte '{user.get('role')}'. Utilisez la bonne page de connexion."
+        }), 403
+
     if not user.get("email_verified", False):
-        return jsonify({"error": "Veuillez vérifier votre email avec le code reçu avant de vous connecter."}), 401
+        return jsonify({
+            "error": "Veuillez vérifier votre email avec le code reçu avant de vous connecter."
+        }), 401
 
     token = jwt.encode({
-        "user_id": user["_id"],
+        "user_id": str(user["_id"]),
         "role": user.get("role", "it_consultant"),
         "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
     }, SECRET_KEY, algorithm="HS256")
 
     user.pop("password", None)
+
     return jsonify({
         "message": "Connexion réussie",
         "token": token,
