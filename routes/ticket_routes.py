@@ -1,11 +1,44 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_from_directory
 import joblib
 import re
+import os
+import uuid
+import datetime
+from werkzeug.utils import secure_filename
 from models.ticket_db import create_ticket, get_tickets_by_user, get_ticket_by_id, update_ticket, delete_ticket, get_all_tickets
 from auth_middleware import token_required
-import datetime
 
 ticket = Blueprint("ticket", __name__)
+
+# ==================== CONFIGURATION UPLOADS ====================
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'xlsx', 'zip'}
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def save_uploaded_files(files):
+    """
+    Sauvegarde une liste de fichiers et retourne une liste de métadonnées.
+    Chaque métadonnée : {filename, url, size, type}
+    """
+    saved = []
+    for file in files:
+        if file and allowed_file(file.filename):
+            original_filename = secure_filename(file.filename)
+            unique_name = f"{uuid.uuid4().hex}_{original_filename}"
+            filepath = os.path.join(UPLOAD_FOLDER, unique_name)
+            file.save(filepath)
+            file_url = f"/uploads/{unique_name}"
+            saved.append({
+                "filename": original_filename,
+                "url": file_url,
+                "size": os.path.getsize(filepath),
+                "type": file.content_type
+            })
+    return saved
 
 # ==================== CHARGEMENT MODÈLE IA ====================
 try:
@@ -49,19 +82,31 @@ def predict_priority_hybrid(subject, body):
 @ticket.route("/create", methods=["POST"])
 @token_required
 def create_ticket_route(current_user):
-    data = request.json
-    subject = data.get("subject", "")
-    body = data.get("body", "")
-    type_personnalise = data.get("type_personnalise", "")
+    # Vérifier si c'est du multipart (fichiers) ou JSON
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        subject = request.form.get("subject", "")
+        body = request.form.get("body", "")
+        type_personnalise = request.form.get("type_personnalise", "")
+        files = request.files.getlist("attachments")
+        attachments = save_uploaded_files(files)
+    else:
+        data = request.json
+        subject = data.get("subject", "")
+        body = data.get("body", "")
+        type_personnalise = data.get("type_personnalise", "")
+        attachments = []
+
     priority_predicted, confidence = predict_priority_hybrid(subject, body)
     priority = priority_predicted
+
     ticket_record = create_ticket(
         subject, body, priority, priority_predicted,
         user_id=str(current_user["_id"]),
         user_name=current_user.get("name", "Développeur"),
         user_email=current_user.get("email", ""),
         type_personnalise=type_personnalise,
-        score_confiance=confidence
+        score_confiance=confidence,
+        attachments=attachments
     )
     return jsonify({
         "message": "Ticket créé",
@@ -103,11 +148,30 @@ def update_ticket_route(current_user, ticket_id):
         return jsonify({"error": "Ticket non trouvé"}), 404
     if current_user.get("role") not in ["it_consultant", "it"] and ticket_record.get("user_id") != str(current_user["_id"]):
         return jsonify({"error": "Non autorisé"}), 403
-    data = request.json
-    allowed_fields = ["priorite", "status", "description", "titre", "type_personnalise"]
-    update_data = {k: v for k, v in data.items() if k in allowed_fields}
+
+    # Traitement multipart ou JSON
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        update_data = {}
+        if "subject" in request.form:
+            update_data["titre"] = request.form.get("subject")
+        if "body" in request.form:
+            update_data["description"] = request.form.get("body")
+        if "type_personnalise" in request.form:
+            update_data["type_personnalise"] = request.form.get("type_personnalise")
+        # Ajout de nouveaux fichiers (on conserve les anciens)
+        files = request.files.getlist("attachments")
+        if files:
+            new_attachments = save_uploaded_files(files)
+            existing_attachments = ticket_record.get("attachments", [])
+            update_data["attachments"] = existing_attachments + new_attachments
+    else:
+        data = request.json
+        allowed_fields = ["priorite", "status", "description", "titre", "type_personnalise"]
+        update_data = {k: v for k, v in data.items() if k in allowed_fields}
+
     if not update_data:
         return jsonify({"error": "Aucun champ valide à mettre à jour"}), 400
+
     updated = update_ticket(ticket_id, update_data)
     return jsonify({"message": "Ticket mis à jour", "ticket": updated}), 200
 
@@ -164,7 +228,6 @@ def predict_route():
         category_map = {"high": "Haute", "medium": "Moyenne", "low": "Basse"}
         display_category = category_map.get(category, category)
         
-        # Ajustement doux de la confiance (optionnel)
         if confidence < 0.5:
             confidence = 0.5 + (0.5 - confidence) * 0.3
         confidence = min(confidence, 0.95)
@@ -174,3 +237,8 @@ def predict_route():
     except Exception as e:
         print(f"Erreur dans predict_route: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+# ==================== ROUTE POUR SERVIR LES FICHIERS UPLOADES ====================
+@ticket.route("/uploads/<filename>")
+def uploaded_file(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)

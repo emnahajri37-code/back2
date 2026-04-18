@@ -9,6 +9,7 @@ from routes.user_routes import user
 from routes.ticket_routes import ticket
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  
 app.config['SECRET_KEY'] = 'ma_super_cle_secrete_pour_les_tokens_12345!'
 app.config['BASE_URL'] = os.environ.get('BASE_URL', 'http://localhost:3000')
 
