@@ -16,14 +16,15 @@ def create_ticket(subject, body, priority, priority_predicted, user_id, user_nam
         "description": body,
         "priorite": priority,                 # priorité actuelle (modifiable)
         "priorite_predite": priority_predicted, # priorité IA (non modifiable)
+        "priority_manual": False,             # flag indiquant si modifié manuellement
         "user_id": user_id,
         "user_name": user_name,
         "user_email": user_email,
         "type_personnalise": type_personnalise,
-        "status": "Non résolu",               # état initial
+        "status": "Non résolu",
         "dateCreation": datetime.datetime.utcnow().isoformat(),
         "scoreConfiance": score_confiance,
-        "attachments": attachments if attachments is not None else []   # fichiers joints
+        "attachments": attachments if attachments is not None else []
     }
     result = tickets_collection.insert_one(ticket)
     ticket["_id"] = str(result.inserted_id)
@@ -35,6 +36,8 @@ def get_tickets_by_user(user_id):
         t["_id"] = str(t["_id"])
         if "attachments" not in t:
             t["attachments"] = []
+        if "priority_manual" not in t:
+            t["priority_manual"] = False
     return tickets
 
 def get_all_tickets():
@@ -43,6 +46,8 @@ def get_all_tickets():
         t["_id"] = str(t["_id"])
         if "attachments" not in t:
             t["attachments"] = []
+        if "priority_manual" not in t:
+            t["priority_manual"] = False
     return tickets
 
 def get_ticket_by_id(ticket_id):
@@ -52,13 +57,15 @@ def get_ticket_by_id(ticket_id):
             ticket["_id"] = str(ticket["_id"])
             if "attachments" not in ticket:
                 ticket["attachments"] = []
+            if "priority_manual" not in ticket:
+                ticket["priority_manual"] = False
         return ticket
     except:
         return None
 
 def update_ticket(ticket_id, data):
     """
-    Met à jour un ticket. data peut contenir 'attachments' (liste complète).
+    Met à jour un ticket. data peut contenir 'attachments', 'priorite', etc.
     """
     if "_id" in data:
         del data["_id"]

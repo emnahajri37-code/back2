@@ -20,10 +20,6 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def save_uploaded_files(files):
-    """
-    Sauvegarde une liste de fichiers et retourne une liste de métadonnées.
-    Chaque métadonnée : {filename, url, size, type}
-    """
     saved = []
     for file in files:
         if file and allowed_file(file.filename):
@@ -82,7 +78,6 @@ def predict_priority_hybrid(subject, body):
 @ticket.route("/create", methods=["POST"])
 @token_required
 def create_ticket_route(current_user):
-    # Vérifier si c'est du multipart (fichiers) ou JSON
     if request.content_type and 'multipart/form-data' in request.content_type:
         subject = request.form.get("subject", "")
         body = request.form.get("body", "")
@@ -97,7 +92,7 @@ def create_ticket_route(current_user):
         attachments = []
 
     priority_predicted, confidence = predict_priority_hybrid(subject, body)
-    priority = priority_predicted
+    priority = priority_predicted  # priorité initiale = prédite
 
     ticket_record = create_ticket(
         subject, body, priority, priority_predicted,
@@ -149,7 +144,6 @@ def update_ticket_route(current_user, ticket_id):
     if current_user.get("role") not in ["it_consultant", "it"] and ticket_record.get("user_id") != str(current_user["_id"]):
         return jsonify({"error": "Non autorisé"}), 403
 
-    # Traitement multipart ou JSON
     if request.content_type and 'multipart/form-data' in request.content_type:
         update_data = {}
         if "subject" in request.form:
@@ -158,7 +152,6 @@ def update_ticket_route(current_user, ticket_id):
             update_data["description"] = request.form.get("body")
         if "type_personnalise" in request.form:
             update_data["type_personnalise"] = request.form.get("type_personnalise")
-        # Ajout de nouveaux fichiers (on conserve les anciens)
         files = request.files.getlist("attachments")
         if files:
             new_attachments = save_uploaded_files(files)
@@ -183,11 +176,14 @@ def update_ticket_priority(current_user, ticket_id):
         return jsonify({"error": "Ticket non trouvé"}), 404
     if current_user.get("role") not in ["it_consultant", "it"] and ticket_record.get("user_id") != str(current_user["_id"]):
         return jsonify({"error": "Non autorisé"}), 403
+
     new_priority = request.json.get("priority")
     if new_priority not in ["low", "medium", "high"]:
         return jsonify({"error": "Priority must be low, medium or high"}), 400
+
     update_data = {
-        "priorite": new_priority,
+        "priorite": new_priority,                     # mise à jour manuelle
+        "priority_manual": True,                      # flag permanent
         "priority_manual_override": True,
         "priority_updated_at": datetime.datetime.utcnow().isoformat()
     }
@@ -205,40 +201,32 @@ def delete_ticket_route(current_user, ticket_id):
     result = delete_ticket(ticket_id)
     return jsonify(result), 200
 
-# ==================== ROUTE POUR L'ANALYSE IA ====================
 @ticket.route("/predict", methods=["POST"])
 def predict_route():
     try:
         data = request.get_json()
         if not data or "text" not in data:
             return jsonify({"error": "Missing 'text' field"}), 400
-        
         text = data["text"]
         cleaned = clean_text(text)
-        
         if priority_model is None:
             return jsonify({"prediction": "Moyenne", "confidence": 0.75})
-        
         X = priority_vectorizer.transform([cleaned])
         proba = priority_model.predict_proba(X)[0]
         confidence = float(max(proba))
         predicted_class = priority_model.predict(X)[0]
         category = priority_label_encoder.inverse_transform([predicted_class])[0]
-        
         category_map = {"high": "Haute", "medium": "Moyenne", "low": "Basse"}
         display_category = category_map.get(category, category)
-        
         if confidence < 0.5:
             confidence = 0.5 + (0.5 - confidence) * 0.3
         confidence = min(confidence, 0.95)
         confidence = round(confidence, 2)
-        
         return jsonify({"prediction": display_category, "confidence": confidence})
     except Exception as e:
         print(f"Erreur dans predict_route: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# ==================== ROUTE POUR SERVIR LES FICHIERS UPLOADES ====================
 @ticket.route("/uploads/<filename>")
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
