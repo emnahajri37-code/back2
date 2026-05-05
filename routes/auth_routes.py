@@ -153,7 +153,7 @@ def google_login():
             user_role = user.get('role', 'it_consultant')
             if user_role != role_requested:
                 return jsonify({
-                    "error": f"Cet email est déjà utilisé avec un compte {user_role}. Veuillez utiliser l'autre page de connexion."
+                    "error": "Cet email est déjà utilisé avec un compte {user_role}. Veuillez utiliser l'autre page de connexion."
                 }), 409
             if not user.get('google_id'):
                 link_google_account(email, google_id)
