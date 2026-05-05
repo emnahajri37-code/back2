@@ -3,10 +3,14 @@ from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail
 import os
-
 from routes.auth_routes import auth
 from routes.user_routes import user
 from routes.ticket_routes import ticket
+from flask import send_from_directory
+
+
+UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
+
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  
@@ -37,6 +41,9 @@ app.register_blueprint(ticket, url_prefix="/tickets")
 @app.route("/")
 def home():
     return "Bienvenue sur le backend"
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=False)
