@@ -9,10 +9,9 @@ from flask_mail import Message
 
 user = Blueprint("user", __name__)
 
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient(os.environ.get('MONGO_URI'))
 db = client["pfe_db"]
 users_collection = db["users"]
-
 # ===========================
 # HELPER: GENERATE & VERIFY TOKEN
 # ===========================

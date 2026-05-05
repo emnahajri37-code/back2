@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 
 SECRET_KEY = "secret123"
 
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient("MONGO_URI")
 db = client["pfe_db"]
 users_collection = db["users"]
 

@@ -11,18 +11,17 @@ from routes.ticket_routes import ticket
 app = Flask(__name__)
 
 # ==================== CONFIGURATION ====================
-# Variables d'environnement (sécurisé pour Render)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ma_super_cle_secrete_pour_les_tokens_12345!')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ma_super_cle_secrete_12345!')
 app.config['BASE_URL'] = os.environ.get('BASE_URL', 'http://localhost:3000')
 
-# Configuration email (Gmail) - avec variables d'environnement
+# Configuration email — tout depuis les variables d'env
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', 'emnasellami18@gmail.com')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'uiobnsjfeqcvetou')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'ticketsystempfe@gmail.com')
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME')  # ← même que USERNAME
 
 # ==================== INITIALISATION ====================
 bcrypt = Bcrypt(app)
@@ -30,16 +29,15 @@ mail = Mail(app)
 app.extensions['mail'] = mail
 
 # ==================== CORS ====================
-# Récupère l'URL du frontend depuis les variables d'environnement
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
-
-CORS(app, 
-     origins=[FRONTEND_URL, "http://localhost:3000", "https://ticket-app-2026.netlify.app"], 
-     supports_credentials=True, 
+CORS(app,
+     origins=[
+         "http://localhost:3000",
+         "https://ticket-app-2026.netlify.app"
+     ],
+     supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"])
 
 # ==================== ROUTES ====================
-# Enregistrement des blueprints
 app.register_blueprint(auth, url_prefix="/auth")
 app.register_blueprint(user, url_prefix="/user")
 app.register_blueprint(ticket, url_prefix="/tickets")

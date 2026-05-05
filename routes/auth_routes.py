@@ -223,7 +223,7 @@ def google_callback():
                 <p><code>{"id_token": "LE_TOKEN_CI_DESSUS"}</code></p>
                 <button onclick="copyToken()">📋 Copier le token</button>
             `;
-            fetch('http://localhost:5000/auth/google', {
+            fetch('https://back2-ys67.onrender.com/auth/google', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({id_token: id_token})
