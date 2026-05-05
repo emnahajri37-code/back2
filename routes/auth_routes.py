@@ -12,7 +12,7 @@ from config.db import GOOGLE_CLIENT_ID
 from flask_bcrypt import Bcrypt
 from flask_mail import Message
 from bson.objectid import ObjectId
-
+import os
 auth = Blueprint("auth", __name__)
 SECRET_KEY = "secret123"
 bcrypt = Bcrypt()

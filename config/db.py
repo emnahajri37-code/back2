@@ -1,5 +1,5 @@
 from pymongo import MongoClient
-
+import os
 client = MongoClient("MONGO_URI")
 db = client["pfe_db"]
 

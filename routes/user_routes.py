@@ -6,7 +6,8 @@ import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
 from flask_mail import Message
-
+import os  # <-- AJOUTEZ CETTE LIGNE !
+from pymongo import MongoClient
 user = Blueprint("user", __name__)
 
 client = MongoClient(os.environ.get('MONGO_URI'))
