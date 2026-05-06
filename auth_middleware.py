@@ -1,12 +1,13 @@
 from functools import wraps
-from flask import request, jsonify, g
+from flask import request, jsonify, g, current_app
 import jwt
 from pymongo import MongoClient
 from bson.objectid import ObjectId
+import os
 
-SECRET_KEY = "secret123"
-
-client = MongoClient("MONGO_URI")
+# ==================== CONFIGURATION ====================
+SECRET_KEY = os.environ.get('SECRET_KEY', 'ma_super_cle_secrete_pour_les_tokens_12345!')
+client = MongoClient(os.environ.get('MONGO_URI'))
 db = client["pfe_db"]
 users_collection = db["users"]
 
