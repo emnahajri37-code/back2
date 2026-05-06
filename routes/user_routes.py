@@ -5,11 +5,11 @@ from auth_middleware import token_required
 import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
-from flask_mail import Message
 from pymongo import MongoClient
 import threading
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
+
 user = Blueprint("user", __name__)
 
 # ==================== CONNEXION MONGODB ====================
@@ -140,31 +140,30 @@ def forgot_password():
     base_url = current_app.config.get('BASE_URL', 'http://localhost:3000')
     reset_link = f"{base_url}/reset-password?token={token}"
 
-    app = current_app._get_current_object()
-    mail = app.extensions.get('mail')
+    def send_email():
+        try:
+            configuration = sib_api_v3_sdk.Configuration()
+            configuration.api_key['api-key'] = os.environ.get('BREVO_API_KEY')
+            api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
+                sib_api_v3_sdk.ApiClient(configuration)
+            )
+            send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+                to=[{"email": email}],
+                sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
+                subject="Réinitialisation de votre mot de passe",
+                text_content=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
+            )
+            api_instance.send_transac_email(send_smtp_email)
+            print("✅ Email envoyé via Brevo API")
+        except ApiException as e:
+            print(f"❌ Erreur Brevo API: {e}")
+        except Exception as e:
+            print(f"❌ Erreur: {e}")
 
-def send_email():
-   
-    
-    configuration = sib_api_v3_sdk.Configuration()
-    configuration.api_key['api-key'] = os.environ.get('BREVO_API_KEY')
-    
-    api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
-        sib_api_v3_sdk.ApiClient(configuration)
-    )
-    
-    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
-        to=[{"email": email}],
-        sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
-        subject="Réinitialisation de votre mot de passe",
-        text_content=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
-    )
-    
-    try:
-        api_instance.send_transac_email(send_smtp_email)
-        print("✅ Email envoyé via Brevo API")
-    except ApiException as e:
-        print(f"❌ Erreur Brevo API: {e}")
+    threading.Thread(target=send_email).start()
+
+    return jsonify({'message': 'Un email de réinitialisation a été envoyé.'}), 200
+
 # ===========================
 # RESET PASSWORD
 # ===========================
