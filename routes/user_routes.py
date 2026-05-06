@@ -14,7 +14,7 @@ user = Blueprint("user", __name__)
 # ==================== CONNEXION MONGODB ====================
 mongo_uri = os.environ.get('MONGO_URI')
 if not mongo_uri:
-    raise ValueError("❌ MONGO_URI n'est pas définie dans les variables d'environnement!")
+    raise ValueError("❌ MONGO_URI n'est pas définie!")
 print(f"✅ Connexion à MongoDB avec URI: {mongo_uri[:30]}...")
 client = MongoClient(mongo_uri)
 db = client["pfe_db"]
@@ -139,25 +139,29 @@ def forgot_password():
     base_url = current_app.config.get('BASE_URL', 'http://localhost:3000')
     reset_link = f"{base_url}/reset-password?token={token}"
 
-    # ✅ Capturer l'app et mail avant le thread
     app = current_app._get_current_object()
     mail = app.extensions.get('mail')
 
-def send_email():
-    with app.app_context():
-        try:
-            msg = Message(
-                subject="Réinitialisation de votre mot de passe",
-                recipients=[email],
-                body=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
-            )
-            print(f"📧 Tentative envoi à {email}")
-            print(f"📧 MAIL_USERNAME: {app.config.get('MAIL_USERNAME')}")
-            print(f"📧 MAIL_PASSWORD défini: {bool(app.config.get('MAIL_PASSWORD'))}")
-            mail.send(msg)
-            print("✅ Email envoyé")
-        except Exception as e:
-            print(f"❌ Erreur email: {e}")
+    def send_email():
+        with app.app_context():
+            try:
+                msg = Message(
+                    subject="Réinitialisation de votre mot de passe",
+                    recipients=[email],
+                    body=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
+                )
+                print(f"📧 Tentative envoi à {email}")
+                print(f"📧 MAIL_USERNAME: {app.config.get('MAIL_USERNAME')}")
+                print(f"📧 MAIL_PASSWORD défini: {bool(app.config.get('MAIL_PASSWORD'))}")
+                mail.send(msg)
+                print("✅ Email envoyé")
+            except Exception as e:
+                print(f"❌ Erreur email: {e}")
+
+    threading.Thread(target=send_email).start()
+
+    return jsonify({'message': 'Un email de réinitialisation a été envoyé.'}), 200
+
 # ===========================
 # RESET PASSWORD
 # ===========================
