@@ -8,7 +8,8 @@ from flask_bcrypt import generate_password_hash
 from flask_mail import Message
 from pymongo import MongoClient
 import threading
-
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 user = Blueprint("user", __name__)
 
 # ==================== CONNEXION MONGODB ====================
@@ -142,9 +143,8 @@ def forgot_password():
     app = current_app._get_current_object()
     mail = app.extensions.get('mail')
 
-    def send_email():
-    import sib_api_v3_sdk
-    from sib_api_v3_sdk.rest import ApiException
+def send_email():
+   
     
     configuration = sib_api_v3_sdk.Configuration()
     configuration.api_key['api-key'] = os.environ.get('BREVO_API_KEY')
