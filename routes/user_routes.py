@@ -9,8 +9,11 @@ from flask_mail import Message
 from pymongo import MongoClient
 
 user = Blueprint("user", __name__)
-
-client = MongoClient(os.environ.get('MONGO_URI'))
+mongo_uri = os.environ.get('MONGO_URI')
+if not mongo_uri:
+    raise ValueError("MONGO_URI n'est pas définie dans les variables d'environnement!")
+client = MongoClient(mongo_uri)
+print(f"Connexion à MongoDB avec URI: {mongo_uri[:20]}...")  # Debug
 db = client["pfe_db"]
 users_collection = db["users"]
 
