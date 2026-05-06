@@ -28,20 +28,32 @@ bcrypt = Bcrypt(app)
 mail = Mail(app)
 app.extensions['mail'] = mail
 
-# ==================== CORS COMPLÈTEMENT OUVERT ====================
+# ==================== CORS COMPLET ====================
+# Permet toutes les origines pour les requêtes avec credentials
 CORS(app, 
      origins="*",
      supports_credentials=True, 
-     allow_headers=["Content-Type", "Authorization"])
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-# Routes
+# Route de test
+@app.route("/")
+def home():
+    return "Bienvenue sur le backend"
+
+# Blueprints
 app.register_blueprint(auth, url_prefix="/auth")
 app.register_blueprint(user, url_prefix="/user")
 app.register_blueprint(ticket, url_prefix="/tickets")
 
-@app.route("/")
-def home():
-    return "Bienvenue sur le backend"
+# ==================== MIDDLEWARE CORS GLOBAL ====================
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
