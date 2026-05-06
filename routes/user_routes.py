@@ -1,17 +1,19 @@
 from flask import Blueprint, request, jsonify, current_app
-from pymongo import MongoClient
+import os
 from bson.objectid import ObjectId
 from auth_middleware import token_required
 import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
 from flask_mail import Message
-
+from pymongo import MongoClient
 user = Blueprint("user", __name__)
-
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient(os.environ.get('MONGO_URI'))
 db = client["pfe_db"]
 users_collection = db["users"]
+
+
+
 
 # ===========================
 # HELPER: GENERATE & VERIFY TOKEN
