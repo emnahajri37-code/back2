@@ -143,7 +143,7 @@ def forgot_password():
     app = current_app._get_current_object()
     mail = app.extensions.get('mail')
 
-    def send_email():
+def send_email():
     with app.app_context():
         try:
             msg = Message(
