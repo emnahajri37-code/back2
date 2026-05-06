@@ -27,7 +27,7 @@ app.config['MAIL_USE_SSL'] = False
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', 'emnasellami18@gmail.com')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'uiobnsjfeqcvetou')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'ticketsystempfe@gmail.com')
-
+app.config['MAIL_TIMEOUT'] = 10
 # Initialisation
 bcrypt = Bcrypt(app)
 mail = Mail(app)
