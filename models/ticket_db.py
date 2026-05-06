@@ -1,8 +1,14 @@
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import datetime
+import os
 
-client = MongoClient("MONGO_URI")
+# ==================== CONNEXION MONGODB ====================
+MONGO_URI = os.environ.get('MONGO_URI')
+if not MONGO_URI:
+    raise ValueError("❌ MONGO_URI n'est pas définie dans les variables d'environnement!")
+
+client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 tickets_collection = db["tickets"]
 
@@ -14,9 +20,9 @@ def create_ticket(subject, body, priority, priority_predicted, user_id, user_nam
     ticket = {
         "titre": subject,
         "description": body,
-        "priorite": priority,                 # priorité actuelle (modifiable)
-        "priorite_predite": priority_predicted, # priorité IA (non modifiable)
-        "priority_manual": False,             # flag indiquant si modifié manuellement
+        "priorite": priority,
+        "priorite_predite": priority_predicted,
+        "priority_manual": False,
         "user_id": user_id,
         "user_name": user_name,
         "user_email": user_email,
