@@ -144,22 +144,20 @@ def forgot_password():
     mail = app.extensions.get('mail')
 
     def send_email():
-        with app.app_context():
-            try:
-                msg = Message(
-                    subject="Réinitialisation de votre mot de passe",
-                    recipients=[email],
-                    body=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
-                )
-                mail.send(msg)
-                print("✅ Email envoyé")
-            except Exception as e:
-                print(f"❌ Erreur email: {e}")
-
-    threading.Thread(target=send_email).start()
-
-    return jsonify({'message': 'Un email de réinitialisation a été envoyé.'}), 200
-
+    with app.app_context():
+        try:
+            msg = Message(
+                subject="Réinitialisation de votre mot de passe",
+                recipients=[email],
+                body=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
+            )
+            print(f"📧 Tentative envoi à {email}")
+            print(f"📧 MAIL_USERNAME: {app.config.get('MAIL_USERNAME')}")
+            print(f"📧 MAIL_PASSWORD défini: {bool(app.config.get('MAIL_PASSWORD'))}")
+            mail.send(msg)
+            print("✅ Email envoyé")
+        except Exception as e:
+            print(f"❌ Erreur email: {e}")
 # ===========================
 # RESET PASSWORD
 # ===========================
