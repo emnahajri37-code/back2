@@ -123,7 +123,6 @@ def google_login():
         if not id_token_credential:
             return jsonify({"error": "Token Google manquant"}), 400
         
-        # 🔐 Vérification du token Google
         from google.oauth2 import id_token
         from google.auth.transport import requests as google_requests
         
@@ -131,7 +130,6 @@ def google_login():
         try:
             info = id_token.verify_oauth2_token(id_token_credential, google_requests.Request(), GOOGLE_CLIENT_ID)
         except Exception as e:
-            print(f"❌ Google token verification failed: {str(e)}")
             return jsonify({"error": "Token Google invalide"}), 400
         
         email = info.get('email')
@@ -142,11 +140,10 @@ def google_login():
         if not email:
             return jsonify({"error": "Email non fourni par Google"}), 400
         
-        # 🔄 Vérification et création utilisateur
         user = users_collection.find_one({"email": email})
         
         if not user:
-            # ➕ Création nouvel utilisateur
+            # ➕ Création d'un NOUVEAU compte (email inconnu)
             user_data = {
                 "username": name,
                 "email": email,
@@ -161,11 +158,19 @@ def google_login():
             user_role = role
             user_username = name
         else:
-            # 🔄 Mise à jour google_id si manquant
+            # 🔒 L'email existe déjà → on vérifie les rôles
+            if user.get('role') != role:
+                return jsonify({
+                    "success": False,
+                    "error": f"Cet email est déjà utilisé pour un compte {user.get('role')}. Veuillez vous connecter avec celui-ci."
+                }), 400
+            
+            # Mise à jour du google_id si absent
             if not user.get('google_id'):
                 users_collection.update_one({"email": email}, {"$set": {"google_id": google_id}})
+            
             user_id = str(user['_id'])
-            user_role = user.get('role', role)
+            user_role = user.get('role')
             user_username = user.get('username', name)
         
         token = jwt.encode({
@@ -190,7 +195,6 @@ def google_login():
     except Exception as e:
         print(f"❌ Google auth error: {str(e)}")
         return jsonify({"success": False, "error": "Erreur d'authentification Google"}), 500
-
 @auth.route("/me", methods=["GET"])
 def get_me():
     auth_header = request.headers.get("Authorization")
