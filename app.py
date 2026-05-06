@@ -9,7 +9,12 @@ from routes.user_routes import user
 from routes.ticket_routes import ticket
 
 app = Flask(__name__)
-
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = 'https://sparkling-wisp-363896.netlify.app'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    return response
 # ==================== CONFIGURATION ====================
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ma_super_cle_secrete_pour_les_tokens_12345!')
 app.config['BASE_URL'] = os.environ.get('BASE_URL', 'http://localhost:3000')
