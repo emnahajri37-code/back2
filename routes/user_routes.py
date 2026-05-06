@@ -7,6 +7,7 @@ import datetime
 from flask_bcrypt import generate_password_hash
 from flask_mail import Message
 from pymongo import MongoClient
+import threading
 
 user = Blueprint("user", __name__)
 
@@ -124,13 +125,8 @@ def delete_user(current_user, user_id):
 # ===========================
 # FORGOT PASSWORD
 # ===========================
-@user.route("/forgot-password", methods=["OPTIONS", "POST"])
+@user.route("/forgot-password", methods=["POST"])
 def forgot_password():
-    # Réponse pour la requête OPTIONS (preflight CORS)
-    if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
-    
-    # Traitement normal de la requête POST
     data = request.get_json()
     email = data.get('email')
     if not email:
@@ -141,27 +137,30 @@ def forgot_password():
         return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
     token = generate_reset_token(email)
-    print(f"\n🔑 TOKEN DE RÉINITIALISATION : {token}\n")
-    base_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
+    base_url = current_app.config.get('BASE_URL', 'http://localhost:3000')
     reset_link = f"{base_url}/reset-password?token={token}"
 
-    try:
-        msg = Message(
-            subject="Réinitialisation de votre mot de passe",
-            recipients=[email],
-            body=f"Bonjour,\n\nCliquez sur ce lien pour réinitialiser votre mot de passe :\n{reset_link}\n\nCe lien expire dans 1 heure.\n\nSi vous n'êtes pas à l'origine, ignorez cet email."
-        )
-        mail = current_app.extensions.get('mail')
-        if mail is None:
-            return jsonify({'error': 'Service mail non configuré'}), 500
-        mail.send(msg)
-        print(f"✅ Email envoyé à {email}")
-    except Exception as e:
-        print(f"❌ Erreur envoi email: {e}")
-        return jsonify({'error': 'Erreur lors de l\'envoi de l\'email'}), 500
+    # ✅ Envoyer l'email dans un thread séparé (non-bloquant)
+    def send_email():
+        with current_app.app_context():
+            try:
+                msg = Message(
+                    subject="Réinitialisation de votre mot de passe",
+                    recipients=[email],
+                    body=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
+                )
+                mail = current_app.extensions.get('mail')
+                if mail:
+                    mail.send(msg)
+                    print("✅ Email envoyé")
+            except Exception as e:
+                print(f"❌ Erreur email: {e}")
 
+    thread = threading.Thread(target=send_email)
+    thread.start()
+
+    # ✅ Répondre immédiatement sans attendre l'email
     return jsonify({'message': 'Un email de réinitialisation a été envoyé.'}), 200
-
 # ===========================
 # RESET PASSWORD
 # ===========================
