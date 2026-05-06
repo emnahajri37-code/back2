@@ -9,11 +9,13 @@ from flask_mail import Message
 from pymongo import MongoClient
 
 user = Blueprint("user", __name__)
+
+# ==================== CONNEXION MONGODB ====================
 mongo_uri = os.environ.get('MONGO_URI')
 if not mongo_uri:
-    raise ValueError("MONGO_URI n'est pas définie dans les variables d'environnement!")
+    raise ValueError("❌ MONGO_URI n'est pas définie dans les variables d'environnement!")
+print(f"✅ Connexion à MongoDB avec URI: {mongo_uri[:30]}...")
 client = MongoClient(mongo_uri)
-print(f"Connexion à MongoDB avec URI: {mongo_uri[:20]}...")  # Debug
 db = client["pfe_db"]
 users_collection = db["users"]
 
@@ -140,7 +142,7 @@ def forgot_password():
 
     token = generate_reset_token(email)
     print(f"\n🔑 TOKEN DE RÉINITIALISATION : {token}\n")
-    base_url = current_app.config.get('BASE_URL', 'http://localhost:3000')
+    base_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
     reset_link = f"{base_url}/reset-password?token={token}"
 
     try:
@@ -153,8 +155,9 @@ def forgot_password():
         if mail is None:
             return jsonify({'error': 'Service mail non configuré'}), 500
         mail.send(msg)
+        print(f"✅ Email envoyé à {email}")
     except Exception as e:
-        print("Erreur envoi email:", e)
+        print(f"❌ Erreur envoi email: {e}")
         return jsonify({'error': 'Erreur lors de l\'envoi de l\'email'}), 500
 
     return jsonify({'message': 'Un email de réinitialisation a été envoyé.'}), 200
