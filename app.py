@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request
+from flask import Flask
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail
@@ -28,32 +28,12 @@ bcrypt = Bcrypt(app)
 mail = Mail(app)
 app.extensions['mail'] = mail
 
-# ==================== CORS COMPLET ====================
+# ==================== CORS UNIQUE ====================
 CORS(app, 
-     origins=["https://sparkling-wisp-363896.netlify.app", "http://localhost:3000", "*"],
+     origins=["https://sparkling-wisp-363896.netlify.app", "http://localhost:3000"],
      supports_credentials=True, 
-     allow_headers=["Content-Type", "Authorization", "Access-Control-Allow-Origin"],
+     allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
-
-# Middleware CORS manuel pour toutes les routes
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', 'https://sparkling-wisp-363896.netlify.app')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
-    return response
-
-# Route OPTIONS globale pour gérer les preflight requests
-@app.route('/<path:path>', methods=['OPTIONS'])
-@app.route('/', methods=['OPTIONS'])
-def handle_options(path=None):
-    response = app.make_default_options_response()
-    response.headers.add('Access-Control-Allow-Origin', 'https://sparkling-wisp-363896.netlify.app')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
-    return response
 
 # Route de test
 @app.route("/")

@@ -12,26 +12,8 @@ client = MongoClient(os.environ.get('MONGO_URI'))
 db = client["pfe_db"]
 users_collection = db["users"]
 
-# ===========================
-# HELPER CORS PREFLIGHT
-# ===========================
-def _build_cors_preflight_response():
-    response = current_app.make_default_options_response()
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
-    response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-    response.headers.add("Access-Control-Allow-Credentials", "true")
-    return response
-
-# ===========================
-# ROUTES
-# ===========================
-
-@auth.route("/signup", methods=["OPTIONS", "POST"])
+@auth.route("/signup", methods=["POST"])
 def signup():
-    if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
-    
     data = request.get_json()
     username = data.get('username')
     email = data.get('email')
@@ -72,11 +54,8 @@ def signup():
         "user": user_data
     }), 201
 
-@auth.route("/login", methods=["OPTIONS", "POST"])
+@auth.route("/login", methods=["POST"])
 def login():
-    if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
-    
     data = request.get_json()
     email = data.get('email')
     password = data.get('password')
@@ -111,12 +90,9 @@ def login():
         "user": user_data
     }), 200
 
-@auth.route("/me", methods=["GET", "OPTIONS"])
+@auth.route("/me", methods=["GET"])
 @token_required
 def get_me(current_user):
-    if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
-    
     user = users_collection.find_one({"_id": current_user["_id"]}, {"password": 0})
     if not user:
         return jsonify({"error": "Utilisateur non trouvé"}), 404
