@@ -4,11 +4,12 @@ import datetime
 from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 import os
-from auth_middleware import token_required
 
 auth = Blueprint("auth", __name__)
 
-client = MongoClient(os.environ.get('MONGO_URI'))
+# Connexion MongoDB
+MONGO_URI = os.environ.get('MONGO_URI')
+client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 users_collection = db["users"]
 
@@ -91,10 +92,26 @@ def login():
     }), 200
 
 @auth.route("/me", methods=["GET"])
-@token_required
-def get_me(current_user):
-    user = users_collection.find_one({"_id": current_user["_id"]}, {"password": 0})
-    if not user:
-        return jsonify({"error": "Utilisateur non trouvé"}), 404
-    user["_id"] = str(user["_id"])
-    return jsonify(user), 200
+def get_me():
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+    
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return jsonify({"error": "Format du token invalide"}), 401
+    
+    token = parts[1]
+    
+    try:
+        data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        user_id = data.get('user_id')
+        user = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
+        if not user:
+            return jsonify({"error": "Utilisateur non trouvé"}), 404
+        user["_id"] = str(user["_id"])
+        return jsonify(user), 200
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token expiré"}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Token invalide"}), 401
