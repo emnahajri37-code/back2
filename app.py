@@ -3,7 +3,7 @@ from flask import Flask
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail
-from routes.google_auth import google_auth
+
 from routes.auth_routes import auth
 from routes.user_routes import user
 from routes.ticket_routes import ticket
@@ -49,7 +49,7 @@ def home():
 app.register_blueprint(auth, url_prefix="/auth")
 app.register_blueprint(user, url_prefix="/user")
 app.register_blueprint(ticket, url_prefix="/tickets")
-app.register_blueprint(google_auth)
+
 # ==================== DEMARRAGE ====================
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 10000))
