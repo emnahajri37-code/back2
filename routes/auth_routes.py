@@ -17,6 +17,15 @@ client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 users_collection = db["users"]
 
+# ==================== HELPER CORS PREFLIGHT ====================
+def _build_cors_preflight_response():
+    response = current_app.make_default_options_response()
+    response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+    response.headers.add("Access-Control-Allow-Credentials", "true")
+    return response
+
 # ==================== ROUTES ====================
 
 @auth.route("/signup", methods=["POST"])
@@ -114,8 +123,12 @@ def login():
         print(f"❌ Login error: {str(e)}")
         return jsonify({"error": "Erreur interne du serveur"}), 500
 
-@auth.route("/google", methods=["POST"])
+@auth.route("/google", methods=["POST", "OPTIONS"])
 def google_login():
+    # Gestion de la requête preflight (OPTIONS)
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
+    
     try:
         data = request.get_json()
         id_token_credential = data.get('id_token') or data.get('credential')
@@ -123,6 +136,7 @@ def google_login():
         if not id_token_credential:
             return jsonify({"error": "Token Google manquant"}), 400
         
+        # 🔐 Vérification du token Google
         from google.oauth2 import id_token
         from google.auth.transport import requests as google_requests
         
@@ -130,6 +144,7 @@ def google_login():
         try:
             info = id_token.verify_oauth2_token(id_token_credential, google_requests.Request(), GOOGLE_CLIENT_ID)
         except Exception as e:
+            print(f"❌ Google token verification failed: {str(e)}")
             return jsonify({"error": "Token Google invalide"}), 400
         
         email = info.get('email')
@@ -140,10 +155,11 @@ def google_login():
         if not email:
             return jsonify({"error": "Email non fourni par Google"}), 400
         
+        # 🔄 Vérification et création utilisateur
         user = users_collection.find_one({"email": email})
         
         if not user:
-            # ➕ Création d'un NOUVEAU compte (email inconnu)
+            # ➕ Création nouvel utilisateur (email inconnu)
             user_data = {
                 "username": name,
                 "email": email,
@@ -158,7 +174,7 @@ def google_login():
             user_role = role
             user_username = name
         else:
-            # 🔒 L'email existe déjà → on vérifie les rôles
+            # 🔒 L'email existe déjà → blocage si rôle différent
             if user.get('role') != role:
                 return jsonify({
                     "success": False,
@@ -195,6 +211,7 @@ def google_login():
     except Exception as e:
         print(f"❌ Google auth error: {str(e)}")
         return jsonify({"success": False, "error": "Erreur d'authentification Google"}), 500
+
 @auth.route("/me", methods=["GET"])
 def get_me():
     auth_header = request.headers.get("Authorization")
