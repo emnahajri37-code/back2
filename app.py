@@ -1,39 +1,41 @@
+import os
 from flask import Flask
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail
-import os
+
 from routes.auth_routes import auth
 from routes.user_routes import user
 from routes.ticket_routes import ticket
-from flask import send_from_directory
-
-
-UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
-
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  
-app.config['SECRET_KEY'] = 'ma_super_cle_secrete_pour_les_tokens_12345!'
+
+# ==================== CONFIGURATION ====================
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ma_super_cle_secrete_pour_les_tokens_12345!')
 app.config['BASE_URL'] = os.environ.get('BASE_URL', 'http://localhost:3000')
 
-# Configuration email (Gmail)
+# Configuration email
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
-app.config['MAIL_USERNAME'] = "ticketsystempfe@gmail.com"
-app.config['MAIL_PASSWORD'] = "uiobnsjfeqcvetou"
-app.config['MAIL_DEFAULT_SENDER'] = "ticketsystempfe@gmail.com"
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', 'emnasellami18@gmail.com')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'uiobnsjfeqcvetou')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'ticketsystempfe@gmail.com')
 
+# Initialisation
 bcrypt = Bcrypt(app)
 mail = Mail(app)
 app.extensions['mail'] = mail
 
-# CORS – autorise les requêtes depuis le frontend React
-CORS(app, origins=["http://localhost:3000"], supports_credentials=True, allow_headers=["Content-Type", "Authorization"])
+# CORS
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+CORS(app, 
+     origins=[FRONTEND_URL, "http://localhost:3000", "https://ticket-app-2026.netlify.app"], 
+     supports_credentials=True, 
+     allow_headers=["Content-Type", "Authorization"])
 
-# Enregistrement des blueprints
+# Routes
 app.register_blueprint(auth, url_prefix="/auth")
 app.register_blueprint(user, url_prefix="/user")
 app.register_blueprint(ticket, url_prefix="/tickets")
@@ -41,9 +43,7 @@ app.register_blueprint(ticket, url_prefix="/tickets")
 @app.route("/")
 def home():
     return "Bienvenue sur le backend"
-@app.route('/uploads/<filename>')
-def uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
 
 if __name__ == "__main__":
-    app.run(debug=True, use_reloader=False)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)

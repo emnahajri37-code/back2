@@ -6,18 +6,13 @@ import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
 from flask_mail import Message
+
 from pymongo import MongoClient
 user = Blueprint("user", __name__)
 client = MongoClient(os.environ.get('MONGO_URI'))
 db = client["pfe_db"]
 users_collection = db["users"]
 
-
-
-
-# ===========================
-# HELPER: GENERATE & VERIFY TOKEN
-# ===========================
 def generate_reset_token(email):
     """Génère un token JWT contenant l'email, valable 1 heure."""
     payload = {

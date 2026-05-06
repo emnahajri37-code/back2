@@ -2,7 +2,7 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 import datetime
 
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient("MONGO_URI")
 db = client["pfe_db"]
 tickets_collection = db["tickets"]
 

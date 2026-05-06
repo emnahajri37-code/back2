@@ -12,7 +12,7 @@ from config.db import GOOGLE_CLIENT_ID
 from flask_bcrypt import Bcrypt
 from flask_mail import Message
 from bson.objectid import ObjectId
-
+import os
 auth = Blueprint("auth", __name__)
 SECRET_KEY = "secret123"
 bcrypt = Bcrypt()
@@ -153,7 +153,7 @@ def google_login():
             user_role = user.get('role', 'it_consultant')
             if user_role != role_requested:
                 return jsonify({
-                    "error": f"Cet email est déjà utilisé avec un compte {user_role}. Veuillez utiliser l'autre page de connexion."
+                    "error": "Cet email est déjà utilisé avec un compte {user_role}. Veuillez utiliser l'autre page de connexion."
                 }), 409
             if not user.get('google_id'):
                 link_google_account(email, google_id)
@@ -223,7 +223,7 @@ def google_callback():
                 <p><code>{"id_token": "LE_TOKEN_CI_DESSUS"}</code></p>
                 <button onclick="copyToken()">📋 Copier le token</button>
             `;
-            fetch('http://localhost:5000/auth/google', {
+            fetch('https://back2-ys67.onrender.com/auth/google', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({id_token: id_token})
