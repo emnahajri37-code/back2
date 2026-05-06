@@ -28,10 +28,9 @@ bcrypt = Bcrypt(app)
 mail = Mail(app)
 app.extensions['mail'] = mail
 
-# CORS
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+# ==================== CORS COMPLÈTEMENT OUVERT ====================
 CORS(app, 
-     origins=[FRONTEND_URL, "http://localhost:3000", "https://ticket-app-2026.netlify.app"], 
+     origins="*",
      supports_credentials=True, 
      allow_headers=["Content-Type", "Authorization"])
 
