@@ -3,8 +3,14 @@ from bson.objectid import ObjectId
 import datetime
 from flask_bcrypt import Bcrypt
 import random
+import os
 
-client = MongoClient("MONGO_URI")
+# ==================== CONNEXION MONGODB ====================
+MONGO_URI = os.environ.get('MONGO_URI')
+if not MONGO_URI:
+    raise ValueError("❌ MONGO_URI n'est pas définie dans les variables d'environnement!")
+
+client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 users_collection = db["users"]
 bcrypt = Bcrypt()
@@ -74,7 +80,7 @@ def create_google_user(google_id, email, name, picture, role="it_consultant"):
         "picture": picture,
         "google_id": google_id,
         "role": role,
-        "email_verified": True,  # Google vérifie déjà l'email
+        "email_verified": True,
         "created_at": datetime.datetime.utcnow()
     }
     result = users_collection.insert_one(user)
