@@ -143,25 +143,28 @@ def forgot_password():
     mail = app.extensions.get('mail')
 
     def send_email():
-        with app.app_context():
-            try:
-                msg = Message(
-                    subject="Réinitialisation de votre mot de passe",
-                    recipients=[email],
-                    body=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
-                )
-                print(f"📧 Tentative envoi à {email}")
-                print(f"📧 MAIL_USERNAME: {app.config.get('MAIL_USERNAME')}")
-                print(f"📧 MAIL_PASSWORD défini: {bool(app.config.get('MAIL_PASSWORD'))}")
-                mail.send(msg)
-                print("✅ Email envoyé")
-            except Exception as e:
-                print(f"❌ Erreur email: {e}")
-
-    threading.Thread(target=send_email).start()
-
-    return jsonify({'message': 'Un email de réinitialisation a été envoyé.'}), 200
-
+    import sib_api_v3_sdk
+    from sib_api_v3_sdk.rest import ApiException
+    
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = os.environ.get('BREVO_API_KEY')
+    
+    api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
+        sib_api_v3_sdk.ApiClient(configuration)
+    )
+    
+    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+        to=[{"email": email}],
+        sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
+        subject="Réinitialisation de votre mot de passe",
+        text_content=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
+    )
+    
+    try:
+        api_instance.send_transac_email(send_smtp_email)
+        print("✅ Email envoyé via Brevo API")
+    except ApiException as e:
+        print(f"❌ Erreur Brevo API: {e}")
 # ===========================
 # RESET PASSWORD
 # ===========================
