@@ -6,13 +6,29 @@ import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
 from flask_mail import Message
-
 from pymongo import MongoClient
+
 user = Blueprint("user", __name__)
+
 client = MongoClient(os.environ.get('MONGO_URI'))
 db = client["pfe_db"]
 users_collection = db["users"]
 
+# ===========================
+# HELPER CORS PREFLIGHT
+# ===========================
+def _build_cors_preflight_response():
+    """Construit la réponse pour la requête OPTIONS (preflight CORS)."""
+    response = current_app.make_default_options_response()
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+    response.headers.add("Access-Control-Allow-Credentials", "true")
+    return response
+
+# ===========================
+# HELPER: GENERATE & VERIFY TOKEN
+# ===========================
 def generate_reset_token(email):
     """Génère un token JWT contenant l'email, valable 1 heure."""
     payload = {
@@ -42,11 +58,11 @@ def update_user_password(email, hashed_password):
 # CRUD UTILISATEURS
 # ===========================
 
-# ⚠️ ROUTE PROFIL (à garder UNE SEULE FOIS)
-@user.route("/profile", methods=["GET"])
+@user.route("/profile", methods=["GET", "OPTIONS"])
 @token_required
 def get_my_profile(current_user):
-    """Récupère le profil de l'utilisateur connecté"""
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     try:
         user_data = users_collection.find_one({"_id": ObjectId(current_user["_id"])}, {"password": 0})
         if not user_data:
@@ -56,26 +72,32 @@ def get_my_profile(current_user):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@user.route("/", methods=["GET"])
+@user.route("/", methods=["GET", "OPTIONS"])
 @token_required
 def get_users(current_user):
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     users = list(users_collection.find({}, {"password": 0}))
     for u in users:
         u["_id"] = str(u["_id"])
     return jsonify(users)
 
-@user.route("/<user_id>", methods=["GET"])
+@user.route("/<user_id>", methods=["GET", "OPTIONS"])
 @token_required
 def get_user(current_user, user_id):
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     user_data = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
     if not user_data:
         return jsonify({"error": "Utilisateur non trouvé"}), 404
     user_data["_id"] = str(user_data["_id"])
     return jsonify(user_data)
 
-@user.route("/<user_id>", methods=["PUT"])
+@user.route("/<user_id>", methods=["PUT", "OPTIONS"])
 @token_required
 def update_user(current_user, user_id):
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     data = request.json
     if "password" in data:
         data["password"] = generate_password_hash(data["password"]).decode('utf-8')
@@ -84,9 +106,11 @@ def update_user(current_user, user_id):
     user_updated["_id"] = str(user_updated["_id"])
     return jsonify({"message": "Utilisateur mis à jour", "user": user_updated})
 
-@user.route("/<user_id>", methods=["DELETE"])
+@user.route("/<user_id>", methods=["DELETE", "OPTIONS"])
 @token_required
 def delete_user(current_user, user_id):
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     result = users_collection.delete_one({"_id": ObjectId(user_id)})
     if result.deleted_count:
         return jsonify({"message": "Utilisateur supprimé"})
@@ -95,8 +119,13 @@ def delete_user(current_user, user_id):
 # ===========================
 # FORGOT PASSWORD
 # ===========================
-@user.route("/forgot-password", methods=["POST"])
+@user.route("/forgot-password", methods=["OPTIONS", "POST"])
 def forgot_password():
+    # Réponse pour la requête OPTIONS (preflight CORS)
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
+    
+    # Traitement normal de la requête POST
     data = request.get_json()
     email = data.get('email')
     if not email:
@@ -130,8 +159,11 @@ def forgot_password():
 # ===========================
 # RESET PASSWORD
 # ===========================
-@user.route("/reset-password", methods=["POST"])
+@user.route("/reset-password", methods=["OPTIONS", "POST"])
 def reset_password():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
+    
     data = request.get_json()
     token = data.get('token')
     new_password = data.get('new_password')
@@ -158,10 +190,13 @@ def reset_password():
         return jsonify({'error': 'Erreur lors de la mise à jour'}), 500
 
 # ===========================
-# ROUTE DE DEBUG (à supprimer après test)
+# ROUTE DE DEBUG
 # ===========================
-@user.route("/debug-token", methods=["POST"])
+@user.route("/debug-token", methods=["OPTIONS", "POST"])
 def debug_token():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
+    
     data = request.get_json()
     token = data.get('token')
     if not token:
