@@ -4,7 +4,6 @@ import datetime
 import random
 import string
 import requests
-import json
 from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -312,7 +311,6 @@ def resend_code():
         print(f"❌ Erreur renvoi code: {str(e)}")
         return jsonify({"error": "Erreur interne"}), 500
 
-# Route de contournement (optionnelle)
 @auth.route("/debug-activate", methods=["POST", "OPTIONS"])
 def debug_activate():
     """Route temporaire pour activer un compte sans email"""

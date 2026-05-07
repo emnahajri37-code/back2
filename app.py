@@ -3,7 +3,6 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail
-
 from routes.auth_routes import auth
 from routes.user_routes import user
 from routes.ticket_routes import ticket
@@ -30,7 +29,7 @@ mail = Mail(app)
 app.extensions['mail'] = mail
 
 # ==================== CORS CORRIGÉ ====================
-# Configuration CORS complète et fonctionnelle
+# Configuration CORS complète
 CORS(app, 
      origins=[
          "https://sparkling-wisp-363896.netlify.app",
@@ -42,18 +41,18 @@ CORS(app,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
      expose_headers=["Content-Type", "Authorization"])
 
-# Middleware CORS supplémentaire pour garantir les headers
+# Middleware CORS pour garantir les headers après chaque requête
 @app.after_request
-def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = 'https://sparkling-wisp-363896.netlify.app'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept, X-Requested-With'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', 'https://sparkling-wisp-363896.netlify.app')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
     return response
 
-# Middleware pour gérer les requêtes OPTIONS (preflight)
+# Middleware pour gérer les requêtes OPTIONS
 @app.before_request
-def handle_preflight():
+def handle_options():
     if request.method == "OPTIONS":
         response = app.make_default_options_response()
         response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
