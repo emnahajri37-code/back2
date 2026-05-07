@@ -19,15 +19,6 @@ client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 users_collection = db["users"]
 
-# ==================== HELPER CORS PREFLIGHT ====================
-def _build_cors_preflight_response():
-    response = current_app.make_default_options_response()
-    response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
-    response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS, GET")
-    response.headers.add("Access-Control-Allow-Credentials", "true")
-    return response
-
 # ==================== FONCTIONS EMAIL ====================
 def generate_verification_token(email):
     """Génère un token sécurisé pour la vérification email"""
@@ -134,10 +125,17 @@ Si vous n'avez pas créé ce compte, ignorez cet email.
 @auth.route("/signup", methods=["POST", "OPTIONS"])
 def signup():
     if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
+        response = jsonify({"message": "OK"})
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
     
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({"error": "Données JSON manquantes"}), 400
+            
         username = data.get('username') or data.get('name') or data.get('fullName')
         email = data.get('email')
         password = data.get('password')
@@ -149,7 +147,12 @@ def signup():
         # Vérifier si l'utilisateur existe déjà
         existing_user = users_collection.find_one({"email": email})
         if existing_user:
-            return jsonify({"error": "Cet email est déjà utilisé. Veuillez vous connecter."}), 400
+            if existing_user.get('email_verified', False):
+                return jsonify({"error": "Cet email est déjà utilisé. Veuillez vous connecter."}), 400
+            else:
+                # Supprimer le compte non vérifié pour permettre une nouvelle inscription
+                users_collection.delete_one({"_id": existing_user['_id']})
+                print(f"🗑️ Ancien compte non vérifié supprimé: {email}")
         
         if username and users_collection.find_one({"username": username}):
             return jsonify({"error": "Ce nom d'utilisateur est déjà pris."}), 400
@@ -165,7 +168,7 @@ def signup():
             "role": role,
             "created_at": datetime.datetime.utcnow().isoformat(),
             "email_verified": False,
-            "active": False,  # Compte inactif jusqu'à vérification email
+            "active": False,
         }
         
         result = users_collection.insert_one(user_data)
@@ -183,6 +186,7 @@ def signup():
         }, current_app.config['SECRET_KEY'], algorithm='HS256')
         
         response_data = {
+            "success": True,
             "message": "Inscription réussie ! Un email de vérification vous a été envoyé." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé. Veuillez contacter le support.",
             "token": token,
             "user": {
@@ -204,24 +208,24 @@ def signup():
         print(f"❌ Signup error: {str(e)}")
         import traceback
         traceback.print_exc()
-        return jsonify({"error": "Erreur interne du serveur"}), 500
+        return jsonify({"error": str(e)}), 500
 
 @auth.route("/verify-email", methods=["GET", "OPTIONS"])
 def verify_email():
     if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
+        response = jsonify({"message": "OK"})
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        return response, 200
     
     try:
         token = request.args.get('token')
         if not token:
             return jsonify({"error": "Token de vérification manquant"}), 400
         
-        # Vérifier le token
         email = verify_verification_token(token)
         if not email:
             return jsonify({"error": "Lien de vérification invalide ou expiré"}), 400
         
-        # Trouver l'utilisateur
         user = users_collection.find_one({"email": email})
         if not user:
             return jsonify({"error": "Utilisateur non trouvé"}), 404
@@ -229,7 +233,6 @@ def verify_email():
         if user.get('email_verified'):
             return jsonify({"message": "Email déjà vérifié. Vous pouvez vous connecter."}), 200
         
-        # Activer le compte
         users_collection.update_one(
             {"email": email},
             {"$set": {
@@ -254,7 +257,9 @@ def verify_email():
 @auth.route("/login", methods=["POST", "OPTIONS"])
 def login():
     if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
+        response = jsonify({"message": "OK"})
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        return response, 200
     
     try:
         data = request.get_json()
@@ -268,7 +273,6 @@ def login():
         if not user or not check_password_hash(user['password'], password):
             return jsonify({"error": "Email ou mot de passe incorrect"}), 401
         
-        # Vérifier si l'email est vérifié
         if not user.get('email_verified', False):
             return jsonify({
                 "error": "Veuillez vérifier votre email avant de vous connecter",
@@ -287,6 +291,7 @@ def login():
         }, current_app.config['SECRET_KEY'], algorithm='HS256')
         
         return jsonify({
+            "success": True,
             "message": "Connexion réussie",
             "token": token,
             "user": {
@@ -305,7 +310,9 @@ def login():
 @auth.route("/google", methods=["POST", "OPTIONS"])
 def google_login():
     if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
+        response = jsonify({"message": "OK"})
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        return response, 200
     
     try:
         data = request.get_json()
@@ -314,7 +321,6 @@ def google_login():
         if not id_token_credential:
             return jsonify({"error": "Token Google manquant"}), 400
         
-        # Vérification du token Google
         from google.oauth2 import id_token
         from google.auth.transport import requests as google_requests
         
@@ -336,7 +342,6 @@ def google_login():
         user = users_collection.find_one({"email": email})
         
         if not user:
-            # Création nouvel utilisateur
             user_data = {
                 "username": name,
                 "email": email,
@@ -351,7 +356,6 @@ def google_login():
             user_role = role
             user_username = name
         else:
-            # Vérification rôle
             if user.get('role') != role:
                 return jsonify({
                     "success": False,
@@ -391,7 +395,9 @@ def google_login():
 @auth.route("/me", methods=["GET", "OPTIONS"])
 def get_me():
     if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
+        response = jsonify({"message": "OK"})
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        return response, 200
     
     auth_header = request.headers.get("Authorization")
     if not auth_header:
@@ -423,7 +429,9 @@ def get_me():
 @auth.route("/check-email", methods=["POST", "OPTIONS"])
 def check_email():
     if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
+        response = jsonify({"message": "OK"})
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        return response, 200
     
     try:
         data = request.get_json()
@@ -445,7 +453,9 @@ def check_email():
 @auth.route("/resend-verification", methods=["POST", "OPTIONS"])
 def resend_verification():
     if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
+        response = jsonify({"message": "OK"})
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        return response, 200
     
     try:
         data = request.get_json()
@@ -461,7 +471,6 @@ def resend_verification():
         if user.get('email_verified'):
             return jsonify({"error": "Email déjà vérifié"}), 400
         
-        # Renvoyer l'email
         email_sent = send_verification_email(email, user.get('username', email))
         
         if email_sent:

@@ -1,5 +1,5 @@
 import os
-from flask import Flask
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail
@@ -9,15 +9,10 @@ from routes.user_routes import user
 from routes.ticket_routes import ticket
 
 app = Flask(__name__)
-@app.after_request
-def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = 'https://sparkling-wisp-363896.netlify.app'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-    return response
+
 # ==================== CONFIGURATION ====================
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ma_super_cle_secrete_pour_les_tokens_12345!')
-app.config['BASE_URL'] = os.environ.get('BASE_URL', 'http://localhost:3000')
+app.config['BASE_URL'] = os.environ.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
 
 # Configuration email
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp-relay.brevo.com')
@@ -28,23 +23,53 @@ app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER')
 app.config['MAIL_TIMEOUT'] = 10
+
 # Initialisation
 bcrypt = Bcrypt(app)
 mail = Mail(app)
 app.extensions['mail'] = mail
 
-# ==================== CORS ====================
-# Permet UNIQUEMENT l'origine Netlify
+# ==================== CORS CORRIGÉ ====================
+# Configuration CORS complète et fonctionnelle
 CORS(app, 
-     origins=["https://sparkling-wisp-363896.netlify.app"],
-     supports_credentials=False,
-     allow_headers=["Content-Type", "Authorization"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+     origins=[
+         "https://sparkling-wisp-363896.netlify.app",
+         "http://localhost:3000",
+         "http://localhost:5173"
+     ],
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+     expose_headers=["Content-Type", "Authorization"])
+
+# Middleware CORS supplémentaire pour garantir les headers
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = 'https://sparkling-wisp-363896.netlify.app'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept, X-Requested-With'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    return response
+
+# Middleware pour gérer les requêtes OPTIONS (preflight)
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = app.make_default_options_response()
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
+        response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        return response
 
 # ==================== ROUTES ====================
 @app.route("/")
 def home():
     return "Bienvenue sur le backend"
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "message": "Backend is running"}), 200
 
 app.register_blueprint(auth, url_prefix="/auth")
 app.register_blueprint(user, url_prefix="/user")
