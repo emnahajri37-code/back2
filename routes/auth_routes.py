@@ -1,9 +1,9 @@
 from flask import Blueprint, request, jsonify, current_app
+from flask_mail import Message
 import jwt
 import datetime
 import random
 import string
-import requests
 from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -26,28 +26,16 @@ def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
 def send_verification_email_with_code(user_email, username, code):
-    """Envoie un email avec code via l'API Brevo (HTTP)"""
+    """Envoie un email avec code via SMTP (Flask-Mail)"""
     try:
-        api_key = current_app.config.get('MAIL_PASSWORD')
-        if not api_key:
-            print("❌ API key Brevo manquante")
+        if not current_app.config.get('MAIL_USERNAME') or not current_app.config.get('MAIL_PASSWORD'):
+            print("❌ Configuration email manquante dans app.config")
             return False
         
-        url = "https://api.brevo.com/v3/smtp/email"
-        
-        payload = {
-            "sender": {
-                "name": "IT Support System",
-                "email": current_app.config.get('MAIL_USERNAME', 'emnahajri37@gmail.com')
-            },
-            "to": [
-                {
-                    "email": user_email,
-                    "name": username
-                }
-            ],
-            "subject": "🔐 Votre code de vérification - IT Support System",
-            "htmlContent": f"""
+        msg = Message(
+            subject="🔐 Votre code de vérification - IT Support System",
+            recipients=[user_email],
+            html=f"""
             <!DOCTYPE html>
             <html>
             <head>
@@ -80,7 +68,7 @@ def send_verification_email_with_code(user_email, username, code):
             </body>
             </html>
             """,
-            "textContent": f"""
+            body=f"""
 IT Support System - Code de vérification
 
 Bonjour {username},
@@ -90,30 +78,17 @@ Votre code de vérification est : {code}
 Ce code expirera dans 10 minutes.
 
 Si vous n'avez pas créé de compte, ignorez cet email.
-            """
-        }
+            """,
+            sender=current_app.config.get('MAIL_DEFAULT_SENDER', current_app.config.get('MAIL_USERNAME'))
+        )
         
-        headers = {
-            "accept": "application/json",
-            "api-key": api_key,
-            "content-type": "application/json"
-        }
+        mail = current_app.extensions['mail']
+        mail.send(msg)
+        print(f"✅ Email envoyé via SMTP à {user_email} - Code: {code}")
+        return True
         
-        print(f"📤 Envoi du code {code} à {user_email} via Brevo API...")
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        
-        if response.status_code == 201:
-            print(f"✅ Email envoyé avec succès à {user_email}")
-            return True
-        else:
-            print(f"❌ Erreur Brevo API: {response.status_code} - {response.text}")
-            return False
-            
-    except requests.exceptions.Timeout:
-        print(f"❌ Timeout lors de l'envoi à {user_email}")
-        return False
     except Exception as e:
-        print(f"❌ Erreur envoi email: {str(e)}")
+        print(f"❌ Erreur envoi email SMTP: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
@@ -123,11 +98,7 @@ Si vous n'avez pas créé de compte, ignorez cet email.
 @auth.route("/signup", methods=["POST", "OPTIONS"])
 def signup():
     if request.method == "OPTIONS":
-        response = jsonify({"message": "OK"})
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
-        return response, 200
+        return jsonify({"message": "OK"}), 200
     
     try:
         data = request.get_json()
@@ -142,7 +113,6 @@ def signup():
         if not email or not password:
             return jsonify({"error": "Email et mot de passe requis"}), 400
         
-        # Vérifier si l'utilisateur existe déjà
         existing_user = users_collection.find_one({"email": email})
         if existing_user:
             if existing_user.get('email_verified', False):
@@ -154,13 +124,9 @@ def signup():
         if username and users_collection.find_one({"username": username}):
             return jsonify({"error": "Ce nom d'utilisateur est déjà pris."}), 400
         
-        # Générer un code de vérification
         verification_code = generate_verification_code()
-        
-        # Hacher le mot de passe
         hashed_password = generate_password_hash(password).decode('utf-8')
         
-        # Créer l'utilisateur
         user_data = {
             "username": username,
             "email": email,
@@ -176,10 +142,8 @@ def signup():
         result = users_collection.insert_one(user_data)
         user_id = str(result.inserted_id)
         
-        # Envoyer l'email avec le code
         email_sent = send_verification_email_with_code(email, username or email, verification_code)
         
-        # Générer un token JWT
         token = jwt.encode({
             'user_id': user_id,
             'email': email,
@@ -189,7 +153,7 @@ def signup():
         
         response_data = {
             "success": True,
-            "message": "Inscription réussie ! Un code de vérification vous a été envoyé par email." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé. Veuillez contacter le support.",
+            "message": "Inscription réussie ! Un code de vérification vous a été envoyé par email." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé.",
             "token": token,
             "user": {
                 "_id": user_id,
@@ -200,9 +164,6 @@ def signup():
                 "active": False
             }
         }
-        
-        if not email_sent:
-            response_data["warning"] = "Le service d'envoi d'email est temporairement indisponible."
             
         return jsonify(response_data), 201
         
@@ -215,11 +176,7 @@ def signup():
 @auth.route("/verify-email", methods=["POST", "OPTIONS"])
 def verify_email():
     if request.method == "OPTIONS":
-        response = jsonify({"message": "OK"})
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
-        return response, 200
+        return jsonify({"message": "OK"}), 200
     
     try:
         data = request.get_json()
@@ -247,7 +204,6 @@ def verify_email():
             if datetime.datetime.utcnow() > expiry:
                 return jsonify({"error": "Code expiré. Veuillez demander un nouveau code."}), 400
         
-        # Activer le compte
         users_collection.update_one(
             {"email": email},
             {"$set": {
@@ -268,11 +224,7 @@ def verify_email():
 @auth.route("/resend-code", methods=["POST", "OPTIONS"])
 def resend_code():
     if request.method == "OPTIONS":
-        response = jsonify({"message": "OK"})
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
-        return response, 200
+        return jsonify({"message": "OK"}), 200
     
     try:
         data = request.get_json()
@@ -288,7 +240,6 @@ def resend_code():
         if user.get('email_verified'):
             return jsonify({"error": "Email déjà vérifié"}), 400
         
-        # Générer un nouveau code
         new_code = generate_verification_code()
         
         users_collection.update_one(
@@ -299,7 +250,6 @@ def resend_code():
             }}
         )
         
-        # Renvoyer l'email
         email_sent = send_verification_email_with_code(email, user.get('username', email), new_code)
         
         if email_sent:
@@ -313,11 +263,8 @@ def resend_code():
 
 @auth.route("/debug-activate", methods=["POST", "OPTIONS"])
 def debug_activate():
-    """Route temporaire pour activer un compte sans email"""
     if request.method == "OPTIONS":
-        response = jsonify({"message": "OK"})
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        return response, 200
+        return jsonify({"message": "OK"}), 200
     
     try:
         data = request.get_json()
@@ -343,9 +290,7 @@ def debug_activate():
 @auth.route("/login", methods=["POST", "OPTIONS"])
 def login():
     if request.method == "OPTIONS":
-        response = jsonify({"message": "OK"})
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        return response, 200
+        return jsonify({"message": "OK"}), 200
     
     try:
         data = request.get_json()
@@ -396,9 +341,7 @@ def login():
 @auth.route("/google", methods=["POST", "OPTIONS"])
 def google_login():
     if request.method == "OPTIONS":
-        response = jsonify({"message": "OK"})
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        return response, 200
+        return jsonify({"message": "OK"}), 200
     
     try:
         data = request.get_json()
@@ -481,9 +424,7 @@ def google_login():
 @auth.route("/me", methods=["GET", "OPTIONS"])
 def get_me():
     if request.method == "OPTIONS":
-        response = jsonify({"message": "OK"})
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        return response, 200
+        return jsonify({"message": "OK"}), 200
     
     auth_header = request.headers.get("Authorization")
     if not auth_header:
@@ -515,9 +456,7 @@ def get_me():
 @auth.route("/check-email", methods=["POST", "OPTIONS"])
 def check_email():
     if request.method == "OPTIONS":
-        response = jsonify({"message": "OK"})
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        return response, 200
+        return jsonify({"message": "OK"}), 200
     
     try:
         data = request.get_json()

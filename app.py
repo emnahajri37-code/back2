@@ -9,7 +9,7 @@ from routes.ticket_routes import ticket
 
 app = Flask(__name__)
 
-# Configuration de base
+# ==================== CONFIGURATION ====================
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ma_super_cle_secrete_pour_les_tokens_12345!')
 app.config['BASE_URL'] = os.environ.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
 
@@ -23,14 +23,19 @@ app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER')
 app.config['MAIL_TIMEOUT'] = 10
 
+# Initialisation
 bcrypt = Bcrypt(app)
 mail = Mail(app)
 app.extensions['mail'] = mail
 
-# Configuration CORS unique et finale
-CORS(app, origins=["https://sparkling-wisp-363896.netlify.app"])
+# ==================== CORS CORRIGÉ ====================
+CORS(app, 
+     origins=["https://sparkling-wisp-363896.netlify.app"],
+     allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     supports_credentials=True)
 
-# Routes
+# ==================== ROUTES ====================
 @app.route("/")
 def home():
     return "Bienvenue sur le backend"
