@@ -3,11 +3,12 @@ import jwt
 import datetime
 import random
 import string
+import requests
+import json
 from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import os
-from flask_mail import Message
 
 auth = Blueprint("auth", __name__)
 
@@ -26,22 +27,34 @@ def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
 def send_verification_email_with_code(user_email, username, code):
-    """Envoie un email avec code à 6 chiffres"""
+    """Envoie un email avec code via l'API Brevo (HTTP)"""
     try:
-        if not current_app.config.get('MAIL_USERNAME') or not current_app.config.get('MAIL_PASSWORD'):
-            print("❌ Configuration email manquante dans app.config")
+        api_key = current_app.config.get('MAIL_PASSWORD')
+        if not api_key:
+            print("❌ API key Brevo manquante")
             return False
         
-        msg = Message(
-            subject="🔐 Code de vérification - IT Support System",
-            recipients=[user_email],
-            html=f"""
+        url = "https://api.brevo.com/v3/smtp/email"
+        
+        payload = {
+            "sender": {
+                "name": "IT Support System",
+                "email": current_app.config.get('MAIL_USERNAME', 'emnahajri37@gmail.com')
+            },
+            "to": [
+                {
+                    "email": user_email,
+                    "name": username
+                }
+            ],
+            "subject": "🔐 Votre code de vérification - IT Support System",
+            "htmlContent": f"""
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="UTF-8">
                 <style>
-                    body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                    body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
                     .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
                     .header {{ background-color: #4CAF50; color: white; padding: 20px; text-align: center; }}
                     .content {{ padding: 30px; background-color: #f9f9f9; text-align: center; }}
@@ -68,7 +81,7 @@ def send_verification_email_with_code(user_email, username, code):
             </body>
             </html>
             """,
-            body=f"""
+            "textContent": f"""
 IT Support System - Code de vérification
 
 Bonjour {username},
@@ -78,14 +91,28 @@ Votre code de vérification est : {code}
 Ce code expirera dans 10 minutes.
 
 Si vous n'avez pas créé de compte, ignorez cet email.
-            """,
-            sender=current_app.config.get('MAIL_DEFAULT_SENDER', current_app.config.get('MAIL_USERNAME'))
-        )
+            """
+        }
         
-        mail = current_app.extensions['mail']
-        mail.send(msg)
-        print(f"✅ Code de vérification envoyé à {user_email}: {code}")
-        return True
+        headers = {
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json"
+        }
+        
+        print(f"📤 Envoi du code {code} à {user_email} via Brevo API...")
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code == 201:
+            print(f"✅ Email envoyé avec succès à {user_email}")
+            return True
+        else:
+            print(f"❌ Erreur Brevo API: {response.status_code} - {response.text}")
+            return False
+            
+    except requests.exceptions.Timeout:
+        print(f"❌ Timeout lors de l'envoi à {user_email}")
+        return False
     except Exception as e:
         print(f"❌ Erreur envoi email: {str(e)}")
         import traceback
@@ -144,7 +171,7 @@ def signup():
             "email_verified": False,
             "active": False,
             "verification_code": verification_code,
-            "verification_code_expiry": datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
+            "verification_code_expiry": (datetime.datetime.utcnow() + datetime.timedelta(minutes=10)).isoformat()
         }
         
         result = users_collection.insert_one(user_data)
@@ -163,7 +190,7 @@ def signup():
         
         response_data = {
             "success": True,
-            "message": "Inscription réussie ! Un code de vérification vous a été envoyé par email." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé.",
+            "message": "Inscription réussie ! Un code de vérification vous a été envoyé par email." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé. Veuillez contacter le support.",
             "token": token,
             "user": {
                 "_id": user_id,
@@ -176,7 +203,7 @@ def signup():
         }
         
         if not email_sent:
-            response_data["warning"] = "Configuration email incomplète. Contactez l'administrateur."
+            response_data["warning"] = "Le service d'envoi d'email est temporairement indisponible."
             
         return jsonify(response_data), 201
         
@@ -211,13 +238,15 @@ def verify_email():
             return jsonify({"message": "Email déjà vérifié"}), 200
         
         stored_code = user.get('verification_code')
-        expiry = user.get('verification_code_expiry')
+        expiry_str = user.get('verification_code_expiry')
         
         if not stored_code or stored_code != code:
             return jsonify({"error": "Code de vérification invalide"}), 400
         
-        if expiry and datetime.datetime.utcnow() > expiry:
-            return jsonify({"error": "Code expiré. Veuillez demander un nouveau code."}), 400
+        if expiry_str:
+            expiry = datetime.datetime.fromisoformat(expiry_str)
+            if datetime.datetime.utcnow() > expiry:
+                return jsonify({"error": "Code expiré. Veuillez demander un nouveau code."}), 400
         
         # Activer le compte
         users_collection.update_one(
@@ -267,7 +296,7 @@ def resend_code():
             {"email": email},
             {"$set": {
                 "verification_code": new_code,
-                "verification_code_expiry": datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
+                "verification_code_expiry": (datetime.datetime.utcnow() + datetime.timedelta(minutes=10)).isoformat()
             }}
         )
         
@@ -282,6 +311,36 @@ def resend_code():
     except Exception as e:
         print(f"❌ Erreur renvoi code: {str(e)}")
         return jsonify({"error": "Erreur interne"}), 500
+
+# Route de contournement (optionnelle)
+@auth.route("/debug-activate", methods=["POST", "OPTIONS"])
+def debug_activate():
+    """Route temporaire pour activer un compte sans email"""
+    if request.method == "OPTIONS":
+        response = jsonify({"message": "OK"})
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        return response, 200
+    
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        
+        if not email:
+            return jsonify({"error": "Email requis"}), 400
+        
+        result = users_collection.update_one(
+            {"email": email},
+            {"$set": {"email_verified": True, "active": True}}
+        )
+        
+        if result.modified_count:
+            print(f"🔧 Compte activé manuellement: {email}")
+            return jsonify({"message": f"Compte {email} activé avec succès"}), 200
+        else:
+            return jsonify({"error": "Utilisateur non trouvé"}), 404
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @auth.route("/login", methods=["POST", "OPTIONS"])
 def login():
