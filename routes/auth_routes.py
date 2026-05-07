@@ -1,12 +1,13 @@
 from flask import Blueprint, request, jsonify, current_app
 import jwt
 import datetime
+import random
+import string
 from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import os
 from flask_mail import Message
-from itsdangerous import URLSafeTimedSerializer
 
 auth = Blueprint("auth", __name__)
 
@@ -19,35 +20,20 @@ client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 users_collection = db["users"]
 
-# ==================== FONCTIONS EMAIL ====================
-def generate_verification_token(email):
-    """Génère un token sécurisé pour la vérification email"""
-    serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
-    return serializer.dumps(email, salt='email-verification')
+# ==================== FONCTIONS CODE VERIFICATION ====================
+def generate_verification_code():
+    """Génère un code à 6 chiffres"""
+    return ''.join(random.choices(string.digits, k=6))
 
-def verify_verification_token(token, expiration=86400):
-    """Vérifie le token et retourne l'email si valide"""
-    serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
+def send_verification_email_with_code(user_email, username, code):
+    """Envoie un email avec code à 6 chiffres"""
     try:
-        email = serializer.loads(token, salt='email-verification', max_age=expiration)
-        return email
-    except Exception:
-        return None
-
-def send_verification_email(user_email, username):
-    """Envoie l'email de vérification avec lien"""
-    try:
-        # Vérifier que la configuration email est présente
         if not current_app.config.get('MAIL_USERNAME') or not current_app.config.get('MAIL_PASSWORD'):
             print("❌ Configuration email manquante dans app.config")
             return False
         
-        token = generate_verification_token(user_email)
-        frontend_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
-        verification_url = f"{frontend_url}/verify-email?token={token}"
-        
         msg = Message(
-            subject="🔐 Vérifiez votre adresse email - IT Support System",
+            subject="🔐 Code de vérification - IT Support System",
             recipients=[user_email],
             html=f"""
             <!DOCTYPE html>
@@ -58,30 +44,21 @@ def send_verification_email(user_email, username):
                     body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
                     .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
                     .header {{ background-color: #4CAF50; color: white; padding: 20px; text-align: center; }}
-                    .content {{ padding: 30px; background-color: #f9f9f9; }}
-                    .button {{ display: inline-block; padding: 12px 24px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
+                    .content {{ padding: 30px; background-color: #f9f9f9; text-align: center; }}
+                    .code {{ font-size: 48px; font-weight: bold; padding: 20px; background-color: #fff; border: 2px dashed #4CAF50; display: inline-block; margin: 20px 0; letter-spacing: 10px; }}
                     .footer {{ text-align: center; padding: 20px; font-size: 12px; color: #888; }}
                 </style>
             </head>
             <body>
                 <div class="container">
                     <div class="header">
-                        <h2>Bienvenue sur IT Support System</h2>
+                        <h2>IT Support System</h2>
                     </div>
                     <div class="content">
                         <h3>Bonjour {username} !</h3>
-                        <p>Merci de vous être inscrit sur notre plateforme de gestion de tickets IT.</p>
-                        <p>Pour activer votre compte, veuillez vérifier votre adresse email :</p>
-                        
-                        <div style="text-align: center;">
-                            <a href="{verification_url}" class="button">✅ Vérifier mon email</a>
-                        </div>
-                        
-                        <p style="background-color: #eee; padding: 10px; border-radius: 3px; word-break: break-all;">
-                            Lien : {verification_url}
-                        </p>
-                        
-                        <p><strong>⚠️ Ce lien expirera dans 24 heures.</strong></p>
+                        <p>Merci de vous être inscrit. Voici votre code de vérification :</p>
+                        <div class="code">{code}</div>
+                        <p>Ce code expirera dans <strong>10 minutes</strong>.</p>
                         <p>Si vous n'avez pas créé de compte, ignorez cet email.</p>
                     </div>
                     <div class="footer">
@@ -92,30 +69,25 @@ def send_verification_email(user_email, username):
             </html>
             """,
             body=f"""
-Bienvenue sur IT Support System !
+IT Support System - Code de vérification
 
 Bonjour {username},
 
-Merci de vous être inscrit. Pour activer votre compte, cliquez sur ce lien :
+Votre code de vérification est : {code}
 
-{verification_url}
+Ce code expirera dans 10 minutes.
 
-Ce lien expirera dans 24 heures.
-
-Si vous n'avez pas créé ce compte, ignorez cet email.
-
----
-© 2025 IT Support System
+Si vous n'avez pas créé de compte, ignorez cet email.
             """,
             sender=current_app.config.get('MAIL_DEFAULT_SENDER', current_app.config.get('MAIL_USERNAME'))
         )
         
         mail = current_app.extensions['mail']
         mail.send(msg)
-        print(f"✅ Email de vérification envoyé à {user_email}")
+        print(f"✅ Code de vérification envoyé à {user_email}: {code}")
         return True
     except Exception as e:
-        print(f"❌ Erreur envoi email à {user_email}: {str(e)}")
+        print(f"❌ Erreur envoi email: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
@@ -150,12 +122,14 @@ def signup():
             if existing_user.get('email_verified', False):
                 return jsonify({"error": "Cet email est déjà utilisé. Veuillez vous connecter."}), 400
             else:
-                # Supprimer le compte non vérifié pour permettre une nouvelle inscription
                 users_collection.delete_one({"_id": existing_user['_id']})
                 print(f"🗑️ Ancien compte non vérifié supprimé: {email}")
         
         if username and users_collection.find_one({"username": username}):
             return jsonify({"error": "Ce nom d'utilisateur est déjà pris."}), 400
+        
+        # Générer un code de vérification
+        verification_code = generate_verification_code()
         
         # Hacher le mot de passe
         hashed_password = generate_password_hash(password).decode('utf-8')
@@ -169,13 +143,15 @@ def signup():
             "created_at": datetime.datetime.utcnow().isoformat(),
             "email_verified": False,
             "active": False,
+            "verification_code": verification_code,
+            "verification_code_expiry": datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
         }
         
         result = users_collection.insert_one(user_data)
         user_id = str(result.inserted_id)
         
-        # Envoyer l'email de vérification
-        email_sent = send_verification_email(email, username or email)
+        # Envoyer l'email avec le code
+        email_sent = send_verification_email_with_code(email, username or email, verification_code)
         
         # Générer un token JWT
         token = jwt.encode({
@@ -187,7 +163,7 @@ def signup():
         
         response_data = {
             "success": True,
-            "message": "Inscription réussie ! Un email de vérification vous a été envoyé." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé. Veuillez contacter le support.",
+            "message": "Inscription réussie ! Un code de vérification vous a été envoyé par email." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé.",
             "token": token,
             "user": {
                 "_id": user_id,
@@ -210,29 +186,40 @@ def signup():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-@auth.route("/verify-email", methods=["GET", "OPTIONS"])
+@auth.route("/verify-email", methods=["POST", "OPTIONS"])
 def verify_email():
     if request.method == "OPTIONS":
         response = jsonify({"message": "OK"})
         response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
     
     try:
-        token = request.args.get('token')
-        if not token:
-            return jsonify({"error": "Token de vérification manquant"}), 400
+        data = request.get_json()
+        email = data.get('email')
+        code = data.get('code')
         
-        email = verify_verification_token(token)
-        if not email:
-            return jsonify({"error": "Lien de vérification invalide ou expiré"}), 400
+        if not email or not code:
+            return jsonify({"error": "Email et code requis"}), 400
         
         user = users_collection.find_one({"email": email})
         if not user:
             return jsonify({"error": "Utilisateur non trouvé"}), 404
         
         if user.get('email_verified'):
-            return jsonify({"message": "Email déjà vérifié. Vous pouvez vous connecter."}), 200
+            return jsonify({"message": "Email déjà vérifié"}), 200
         
+        stored_code = user.get('verification_code')
+        expiry = user.get('verification_code_expiry')
+        
+        if not stored_code or stored_code != code:
+            return jsonify({"error": "Code de vérification invalide"}), 400
+        
+        if expiry and datetime.datetime.utcnow() > expiry:
+            return jsonify({"error": "Code expiré. Veuillez demander un nouveau code."}), 400
+        
+        # Activer le compte
         users_collection.update_one(
             {"email": email},
             {"$set": {
@@ -242,17 +229,59 @@ def verify_email():
             }}
         )
         
-        print(f"✅ Email vérifié: {email}")
+        print(f"✅ Email vérifié avec code: {email}")
         
-        frontend_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
-        return jsonify({
-            "message": "Email vérifié avec succès ! Vous pouvez maintenant vous connecter.",
-            "redirect_url": f"{frontend_url}/login?verified=true"
-        }), 200
+        return jsonify({"message": "Email vérifié avec succès ! Redirection vers la connexion..."}), 200
         
     except Exception as e:
         print(f"❌ Erreur vérification: {str(e)}")
         return jsonify({"error": "Erreur lors de la vérification"}), 500
+
+@auth.route("/resend-code", methods=["POST", "OPTIONS"])
+def resend_code():
+    if request.method == "OPTIONS":
+        response = jsonify({"message": "OK"})
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        
+        if not email:
+            return jsonify({"error": "Email requis"}), 400
+        
+        user = users_collection.find_one({"email": email})
+        if not user:
+            return jsonify({"error": "Utilisateur non trouvé"}), 404
+        
+        if user.get('email_verified'):
+            return jsonify({"error": "Email déjà vérifié"}), 400
+        
+        # Générer un nouveau code
+        new_code = generate_verification_code()
+        
+        users_collection.update_one(
+            {"email": email},
+            {"$set": {
+                "verification_code": new_code,
+                "verification_code_expiry": datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
+            }}
+        )
+        
+        # Renvoyer l'email
+        email_sent = send_verification_email_with_code(email, user.get('username', email), new_code)
+        
+        if email_sent:
+            return jsonify({"message": "Nouveau code envoyé avec succès"}), 200
+        else:
+            return jsonify({"error": "Erreur d'envoi d'email"}), 500
+        
+    except Exception as e:
+        print(f"❌ Erreur renvoi code: {str(e)}")
+        return jsonify({"error": "Erreur interne"}), 500
 
 @auth.route("/login", methods=["POST", "OPTIONS"])
 def login():
@@ -449,35 +478,3 @@ def check_email():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@auth.route("/resend-verification", methods=["POST", "OPTIONS"])
-def resend_verification():
-    if request.method == "OPTIONS":
-        response = jsonify({"message": "OK"})
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        return response, 200
-    
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        
-        if not email:
-            return jsonify({"error": "Email requis"}), 400
-        
-        user = users_collection.find_one({"email": email})
-        if not user:
-            return jsonify({"error": "Utilisateur non trouvé"}), 404
-        
-        if user.get('email_verified'):
-            return jsonify({"error": "Email déjà vérifié"}), 400
-        
-        email_sent = send_verification_email(email, user.get('username', email))
-        
-        if email_sent:
-            return jsonify({"message": "Email de vérification renvoyé"}), 200
-        else:
-            return jsonify({"error": "Impossible d'envoyer l'email"}), 500
-        
-    except Exception as e:
-        print(f"❌ Erreur renvoi: {str(e)}")
-        return jsonify({"error": "Erreur interne"}), 500
