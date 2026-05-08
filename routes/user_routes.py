@@ -44,20 +44,26 @@ def delete_user_separate(current_user, user_id):
         response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         return response, 200
     
+    # Vérification des droits (admin ou IT consultant uniquement)
     if current_user.get('role') not in ['admin', 'it_consultant']:
         return jsonify({"error": "Action non autorisée. Droits administrateur requis."}), 403
     
+    # Empêche la suppression de son propre compte
     if str(current_user.get('_id')) == user_id:
         return jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"}), 400
     
     try:
-        result = users_collection.delete_one({"_id": ObjectId(user_id)})
+        # Conversion de l'ID en ObjectId
+        from bson.objectid import ObjectId
+        object_id = ObjectId(user_id)
+        
+        result = users_collection.delete_one({"_id": object_id})
         if result.deleted_count:
             return jsonify({"message": "Utilisateur supprimé avec succès"}), 200
         return jsonify({"error": "Utilisateur non trouvé"}), 404
     except Exception as e:
+        print(f"Erreur suppression: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
 # ==================== HELPER: TOKENS ====================
 def generate_reset_token(email):
     payload = {
