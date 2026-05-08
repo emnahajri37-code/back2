@@ -6,7 +6,7 @@ import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
 from pymongo import MongoClient
-from email_service import send_reset_password_email
+import resend
 
 user = Blueprint("user", __name__)
 
@@ -17,6 +17,12 @@ if not mongo_uri:
 client = MongoClient(mongo_uri)
 db = client["pfe_db"]
 users_collection = db["users"]
+
+# ==================== CONFIGURATION RESEND ====================
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY')
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
+    print("✅ Resend configuré")
 
 # ==================== HELPER CORS PREFLIGHT ====================
 def _build_cors_preflight_response():
@@ -38,11 +44,9 @@ def delete_user_separate(current_user, user_id):
         response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         return response, 200
     
-    # Vérification des droits (admin ou IT consultant uniquement)
     if current_user.get('role') not in ['admin', 'it_consultant']:
         return jsonify({"error": "Action non autorisée. Droits administrateur requis."}), 403
     
-    # Empêche la suppression de son propre compte
     if str(current_user.get('_id')) == user_id:
         return jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"}), 400
     
@@ -127,7 +131,6 @@ def user_by_id(current_user, user_id):
     
     if request.method == "PUT":
         try:
-            # Vérification des droits
             if current_user.get('role') not in ['admin', 'it_consultant'] and str(current_user.get('_id')) != user_id:
                 return jsonify({"error": "Action non autorisée"}), 403
             
@@ -135,11 +138,9 @@ def user_by_id(current_user, user_id):
             if not data:
                 return jsonify({"error": "Données manquantes"}), 400
             
-            # Champs autorisés
-            allowed_fields = ["username", "name", "email", "phone", "location", "role"]
+            allowed_fields = ["username", "name", "email", "phone", "location"]
             update_data = {k: v for k, v in data.items() if k in allowed_fields if v is not None}
             
-            # Gestion du mot de passe
             if "password" in data and data["password"]:
                 if len(data["password"]) < 6:
                     return jsonify({"error": "Le mot de passe doit contenir au moins 6 caractères"}), 400
@@ -154,7 +155,8 @@ def user_by_id(current_user, user_id):
                 return jsonify({"error": "Utilisateur non trouvé"}), 404
             
             user_updated = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
-            user_updated["_id"] = str(user_updated["_id"])
+            if user_updated:
+                user_updated["_id"] = str(user_updated["_id"])
             return jsonify({"message": "Utilisateur mis à jour", "user": user_updated}), 200
             
         except Exception as e:
@@ -174,7 +176,6 @@ def forgot_password():
     if not email:
         return jsonify({'error': 'Email requis'}), 400
 
-    # Réponse neutre pour ne pas révéler si l'email existe
     user_doc = users_collection.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
     if not user_doc:
         return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
@@ -183,7 +184,20 @@ def forgot_password():
     base_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
     reset_link = f"{base_url}/reset-password?token={token}"
 
-    send_reset_password_email(email, reset_link)
+    # Envoi d'email avec Resend
+    try:
+        if RESEND_API_KEY:
+            resend.Emails.send({
+                "from": "IT Support <onboarding@resend.dev>",
+                "to": [email],
+                "subject": "Réinitialisation de votre mot de passe",
+                "html": f"<p>Bonjour,</p><p>Cliquez sur ce lien pour réinitialiser votre mot de passe :</p><a href='{reset_link}'>{reset_link}</a><p>Ce lien expire dans 1 heure.</p>"
+            })
+            print(f"✅ Email envoyé à {email}")
+        else:
+            print(f"🔑 Token pour {email}: {reset_link}")
+    except Exception as e:
+        print(f"❌ Erreur envoi email: {e}")
 
     return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
@@ -235,12 +249,7 @@ def debug_token():
     if not token:
         return jsonify({"error": "Token manquant"}), 400
     try:
-        payload = jwt.decode(
-            token,
-            current_app.config['SECRET_KEY'],
-            algorithms=['HS256'],
-            options={"verify_exp": False}
-        )
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'], options={"verify_exp": False})
         return jsonify({
             "valid_signature": True,
             "payload": payload,
