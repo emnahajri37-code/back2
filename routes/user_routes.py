@@ -156,6 +156,6 @@ def reset_password():
     if update_user_password(email, hashed):
         return jsonify({'message': 'Mot de passe réinitialisé avec succès'}), 200
     return jsonify({'error': 'Erreur lors de la mise à jour'}), 500
-    @user.route("/test-delete/<user_id>", methods=["DELETE"])
+@user.route("/test-delete/<user_id>", methods=["DELETE"])
 def test_delete(user_id):
     return jsonify({"message": f"DELETE test for {user_id}"}), 200
