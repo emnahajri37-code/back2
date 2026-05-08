@@ -8,6 +8,7 @@ from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import os
+import requests
 
 auth = Blueprint("auth", __name__)
 
@@ -26,16 +27,24 @@ def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
 def send_verification_email_with_code(user_email, username, code):
-    """Envoie un email avec code via SMTP (Flask-Mail)"""
+    """Envoie un email via l'API Brevo (HTTP) - pas de blocage Render"""
     try:
-        if not current_app.config.get('MAIL_USERNAME') or not current_app.config.get('MAIL_PASSWORD'):
-            print("❌ Configuration email manquante dans app.config")
+        api_key = current_app.config.get('BREVO_API_KEY')
+        
+        if not api_key:
+            print("❌ Clé API Brevo manquante")
             return False
         
-        msg = Message(
-            subject="🔐 Votre code de vérification - IT Support System",
-            recipients=[user_email],
-            html=f"""
+        url = "https://api.brevo.com/v3/smtp/email"
+        
+        payload = {
+            "sender": {
+                "name": "IT Support System",
+                "email": current_app.config.get('MAIL_DEFAULT_SENDER', 'emnahajri37@gmail.com')
+            },
+            "to": [{"email": user_email, "name": username}],
+            "subject": "🔐 Votre code de vérification - IT Support System",
+            "htmlContent": f"""
             <!DOCTYPE html>
             <html>
             <head>
@@ -68,7 +77,7 @@ def send_verification_email_with_code(user_email, username, code):
             </body>
             </html>
             """,
-            body=f"""
+            "textContent": f"""
 IT Support System - Code de vérification
 
 Bonjour {username},
@@ -78,19 +87,27 @@ Votre code de vérification est : {code}
 Ce code expirera dans 10 minutes.
 
 Si vous n'avez pas créé de compte, ignorez cet email.
-            """,
-            sender=current_app.config.get('MAIL_DEFAULT_SENDER', current_app.config.get('MAIL_USERNAME'))
-        )
+            """
+        }
         
-        mail = current_app.extensions['mail']
-        mail.send(msg)
-        print(f"✅ Email envoyé via SMTP à {user_email} - Code: {code}")
-        return True
+        headers = {
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json"
+        }
         
+        print(f"📤 Envoi du code {code} à {user_email} via Brevo API...")
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code == 201:
+            print(f"✅ Email envoyé via API à {user_email} - Code: {code}")
+            return True
+        else:
+            print(f"❌ API erreur: {response.status_code} - {response.text}")
+            return False
+            
     except Exception as e:
-        print(f"❌ Erreur envoi email SMTP: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ Erreur API: {str(e)}")
         return False
 
 # ==================== ROUTES ====================
@@ -153,7 +170,7 @@ def signup():
         
         response_data = {
             "success": True,
-            "message": "Inscription réussie ! Un code de vérification vous a été envoyé par email." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé.",
+            "message": "Inscription réussie ! Un code de vérification vous a été envoyé par email." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé. Utilisez /debug-activate pour activer votre compte.",
             "token": token,
             "user": {
                 "_id": user_id,
@@ -263,6 +280,7 @@ def resend_code():
 
 @auth.route("/debug-activate", methods=["POST", "OPTIONS"])
 def debug_activate():
+    """Route pour activer un compte sans email (utiliser en cas de problème)"""
     if request.method == "OPTIONS":
         return jsonify({"message": "OK"}), 200
     
@@ -452,22 +470,6 @@ def get_me():
         return jsonify({"error": "Token expiré"}), 401
     except jwt.InvalidTokenError:
         return jsonify({"error": "Token invalide"}), 401
-@auth.route("/test-email", methods=["GET"])
-def test_email():
-    """Route pour tester l'envoi d'email"""
-    try:
-        from flask_mail import Message
-        msg = Message(
-            subject="Test SMTP Brevo",
-            recipients=["emnahajri37@gmail.com"],
-            body="Ceci est un test."
-        )
-        mail = current_app.extensions['mail']
-        mail.send(msg)
-        return jsonify({"message": "Email envoyé !"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 
 @auth.route("/check-email", methods=["POST", "OPTIONS"])
 def check_email():
