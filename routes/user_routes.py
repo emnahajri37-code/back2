@@ -16,14 +16,11 @@ user = Blueprint("user", __name__)
 mongo_uri = os.environ.get('MONGO_URI')
 if not mongo_uri:
     raise ValueError("❌ MONGO_URI n'est pas définie!")
-print(f"✅ Connexion à MongoDB avec URI: {mongo_uri[:30]}...")
 client = MongoClient(mongo_uri)
 db = client["pfe_db"]
 users_collection = db["users"]
 
-# ===========================
-# HELPER CORS PREFLIGHT
-# ===========================
+# ==================== HELPER CORS PREFLIGHT ====================
 def _build_cors_preflight_response():
     response = current_app.make_default_options_response()
     response.headers.add("Access-Control-Allow-Origin", "*")
@@ -32,20 +29,67 @@ def _build_cors_preflight_response():
     response.headers.add("Access-Control-Allow-Credentials", "true")
     return response
 
-# ===========================
-# HELPER: GENERATE & VERIFY TOKEN
-# ===========================
+# ==================== HELPER: ENVOI EMAIL BREVO ====================
+def send_email_brevo(to_email, subject, html_content, text_content):
+    """
+    Envoi d'email via Brevo dans un thread séparé.
+    Corrections apportées :
+    - Vérification que BREVO_API_KEY est bien définie
+    - html_content ajouté (était absent dans l'original)
+    - Meilleure gestion des erreurs avec messages clairs
+    """
+    def _send():
+        api_key = os.environ.get('BREVO_API_KEY')
+        if not api_key:
+            print("❌ BREVO_API_KEY non définie dans les variables d'environnement")
+            return
+
+        try:
+            configuration = sib_api_v3_sdk.Configuration()
+            configuration.api_key['api-key'] = api_key
+
+            api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
+                sib_api_v3_sdk.ApiClient(configuration)
+            )
+            email_obj = sib_api_v3_sdk.SendSmtpEmail(
+                to=[{"email": to_email}],
+                sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
+                subject=subject,
+                html_content=html_content,
+                text_content=text_content
+            )
+            api_instance.send_transac_email(email_obj)
+            print(f"✅ Email envoyé à {to_email}")
+
+        except ApiException as e:
+            # Décode le body pour avoir le message Brevo exact
+            try:
+                import json
+                body = json.loads(e.body)
+                print(f"❌ Erreur Brevo API [{e.status}]: {body.get('message', e.body)}")
+            except Exception:
+                print(f"❌ Erreur Brevo API [{e.status}]: {e.body}")
+
+        except Exception as e:
+            print(f"❌ Erreur inattendue lors de l'envoi email: {e}")
+
+    threading.Thread(target=_send, daemon=True).start()
+
+# ==================== HELPER: TOKENS ====================
 def generate_reset_token(email):
     payload = {
         'email': email,
+        'purpose': 'password_reset',      # ✅ Ajout d'un champ purpose pour valider l'usage
         'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)
     }
-    token = jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
-    return token
+    return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
 
 def verify_reset_token(token):
     try:
         payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
+        # ✅ Vérifie que le token est bien destiné au reset password
+        if payload.get('purpose') != 'password_reset':
+            return None
         return payload.get('email')
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
@@ -57,9 +101,7 @@ def update_user_password(email, hashed_password):
     )
     return result.modified_count > 0
 
-# ===========================
-# CRUD UTILISATEURS
-# ===========================
+# ==================== CRUD UTILISATEURS ====================
 
 @user.route("/profile", methods=["GET", "OPTIONS"])
 @token_required
@@ -119,20 +161,22 @@ def delete_user(current_user, user_id):
         return jsonify({"message": "Utilisateur supprimé"})
     return jsonify({"error": "Utilisateur non trouvé"}), 404
 
-# ===========================
-# FORGOT PASSWORD
-# ===========================
+# ==================== FORGOT PASSWORD ====================
 @user.route("/forgot-password", methods=["POST", "OPTIONS"])
 def forgot_password():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
 
     data = request.get_json()
-    email = data.get('email')
+    if not data:
+        return jsonify({'error': 'Corps de requête invalide'}), 400
+
+    email = data.get('email', '').strip().lower()
     if not email:
         return jsonify({'error': 'Email requis'}), 400
 
-    user_doc = users_collection.find_one({"email": email})
+    # Réponse neutre pour ne pas révéler si l'email existe
+    user_doc = users_collection.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
     if not user_doc:
         return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
@@ -140,48 +184,50 @@ def forgot_password():
     base_url = current_app.config.get('BASE_URL', 'http://localhost:3000')
     reset_link = f"{base_url}/reset-password?token={token}"
 
-    def send_email():
-        try:
-            configuration = sib_api_v3_sdk.Configuration()
-            configuration.api_key['api-key'] = os.environ.get('BREVO_API_KEY')
-            api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
-                sib_api_v3_sdk.ApiClient(configuration)
-            )
-            send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
-                to=[{"email": email}],
-                sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
-                subject="Réinitialisation de votre mot de passe",
-                text_content=f"Bonjour,\n\nCliquez sur ce lien :\n{reset_link}\n\nExpire dans 1 heure."
-            )
-            api_instance.send_transac_email(send_smtp_email)
-            print("✅ Email envoyé via Brevo API")
-        except ApiException as e:
-            print(f"❌ Erreur Brevo API: {e}")
-        except Exception as e:
-            print(f"❌ Erreur: {e}")
+    send_email_brevo(
+        to_email=email,
+        subject="Réinitialisation de votre mot de passe",
+        html_content=f"""
+            <h2>Réinitialisation de mot de passe</h2>
+            <p>Bonjour,</p>
+            <p>Vous avez demandé à réinitialiser votre mot de passe. Cliquez sur le bouton ci-dessous :</p>
+            <a href="{reset_link}" style="
+                display:inline-block;padding:12px 24px;background:#4F46E5;
+                color:white;text-decoration:none;border-radius:6px;">
+                Réinitialiser mon mot de passe
+            </a>
+            <p>Ce lien expire dans <strong>1 heure</strong>.</p>
+            <p>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
+        """,
+        text_content=f"Bonjour,\n\nCliquez sur ce lien pour réinitialiser votre mot de passe :\n{reset_link}\n\nExpire dans 1 heure.\n\nSi vous n'avez pas fait cette demande, ignorez cet email."
+    )
 
-    threading.Thread(target=send_email).start()
+    return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
-    return jsonify({'message': 'Un email de réinitialisation a été envoyé.'}), 200
 
-# ===========================
-# RESET PASSWORD
-# ===========================
-@user.route("/reset-password", methods=["OPTIONS", "POST"])
+# ==================== RESET PASSWORD ====================
+@user.route("/reset-password", methods=["POST", "OPTIONS"])
 def reset_password():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
 
     data = request.get_json()
-    token = data.get('token')
-    new_password = data.get('new_password')
-    confirm_password = data.get('confirm_password')
+    if not data:
+        return jsonify({'error': 'Corps de requête invalide'}), 400
+
+    token = data.get('token', '').strip()
+    new_password = data.get('new_password', '')
+    confirm_password = data.get('confirm_password', '')
 
     if not token or not new_password or not confirm_password:
         return jsonify({'error': 'Token, nouveau mot de passe et confirmation requis'}), 400
 
     if new_password != confirm_password:
         return jsonify({'error': 'Les mots de passe ne correspondent pas'}), 400
+
+    # ✅ Validation longueur minimale
+    if len(new_password) < 8:
+        return jsonify({'error': 'Le mot de passe doit contenir au moins 8 caractères'}), 400
 
     email = verify_reset_token(token)
     if not email:
@@ -197,9 +243,8 @@ def reset_password():
     else:
         return jsonify({'error': 'Erreur lors de la mise à jour'}), 500
 
-# ===========================
-# ROUTE DE DEBUG
-# ===========================
+
+# ==================== DEBUG TOKEN ====================
 @user.route("/debug-token", methods=["OPTIONS", "POST"])
 def debug_token():
     if request.method == "OPTIONS":
@@ -210,7 +255,12 @@ def debug_token():
     if not token:
         return jsonify({"error": "Token manquant"}), 400
     try:
-        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'], options={"verify_exp": False})
+        payload = jwt.decode(
+            token,
+            current_app.config['SECRET_KEY'],
+            algorithms=['HS256'],
+            options={"verify_exp": False}
+        )
         return jsonify({
             "valid_signature": True,
             "payload": payload,
