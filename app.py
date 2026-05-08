@@ -16,7 +16,7 @@ app.config['BASE_URL'] = os.environ.get('BASE_URL', 'https://sparkling-wisp-3638
 CORS(app, 
      origins=["https://sparkling-wisp-363896.netlify.app"],
      allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
      supports_credentials=True)
 
 # ==================== ROUTES ====================
