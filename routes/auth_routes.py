@@ -1,14 +1,12 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, redirect
 from flask_mail import Message
 import jwt
 import datetime
-import random
-import string
+import secrets
 from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import os
-import requests
 
 auth = Blueprint("auth", __name__)
 
@@ -21,94 +19,44 @@ client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 users_collection = db["users"]
 
-# ==================== FONCTIONS CODE VERIFICATION ====================
-def generate_verification_code():
-    """Génère un code à 6 chiffres"""
-    return ''.join(random.choices(string.digits, k=6))
+# ==================== HELPER ====================
 
-def send_verification_email_with_code(user_email, username, code):
-    """Envoie un email via l'API Brevo (HTTP) - pas de blocage Render"""
-    try:
-        api_key = current_app.config.get('BREVO_API_KEY')
-        
-        if not api_key:
-            print("❌ Clé API Brevo manquante")
-            return False
-        
-        url = "https://api.brevo.com/v3/smtp/email"
-        
-        payload = {
-            "sender": {
-                "name": "IT Support System",
-                "email": current_app.config.get('MAIL_DEFAULT_SENDER', 'emnahajri37@gmail.com')
-            },
-            "to": [{"email": user_email, "name": username}],
-            "subject": "🔐 Votre code de vérification - IT Support System",
-            "htmlContent": f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <style>
-                    body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
-                    .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                    .header {{ background-color: #4CAF50; color: white; padding: 20px; text-align: center; }}
-                    .content {{ padding: 30px; background-color: #f9f9f9; text-align: center; }}
-                    .code {{ font-size: 48px; font-weight: bold; padding: 20px; background-color: #fff; border: 2px dashed #4CAF50; display: inline-block; margin: 20px 0; letter-spacing: 10px; }}
-                    .footer {{ text-align: center; padding: 20px; font-size: 12px; color: #888; }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h2>IT Support System</h2>
-                    </div>
-                    <div class="content">
-                        <h3>Bonjour {username} !</h3>
-                        <p>Merci de vous être inscrit. Voici votre code de vérification :</p>
-                        <div class="code">{code}</div>
-                        <p>Ce code expirera dans <strong>10 minutes</strong>.</p>
-                        <p>Si vous n'avez pas créé de compte, ignorez cet email.</p>
-                    </div>
-                    <div class="footer">
-                        <p>© 2025 IT Support System</p>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """,
-            "textContent": f"""
-IT Support System - Code de vérification
-
-Bonjour {username},
-
-Votre code de vérification est : {code}
-
-Ce code expirera dans 10 minutes.
-
-Si vous n'avez pas créé de compte, ignorez cet email.
-            """
-        }
-        
-        headers = {
-            "accept": "application/json",
-            "api-key": api_key,
-            "content-type": "application/json"
-        }
-        
-        print(f"📤 Envoi du code {code} à {user_email} via Brevo API...")
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        
-        if response.status_code == 201:
-            print(f"✅ Email envoyé via API à {user_email} - Code: {code}")
-            return True
-        else:
-            print(f"❌ API erreur: {response.status_code} - {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Erreur API: {str(e)}")
-        return False
+def send_verification_email(email, token):
+    mail = current_app.extensions.get('mail')
+    if not mail:
+        raise RuntimeError("Flask-Mail non initialisé")
+    
+    base_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
+    verify_url = f"{base_url}/verify-email?token={token}"
+    
+    msg = Message(
+        subject="Vérifiez votre adresse email",
+        recipients=[email],
+        html=f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #4F46E5;">Bienvenue !</h2>
+            <p>Merci de vous être inscrit. Cliquez sur le bouton ci-dessous pour vérifier votre adresse email :</p>
+            <a href="{verify_url}" style="
+                display: inline-block;
+                padding: 12px 24px;
+                background: #4F46E5;
+                color: #ffffff;
+                text-decoration: none;
+                border-radius: 6px;
+                font-weight: bold;
+                margin: 16px 0;
+            ">Vérifier mon email</a>
+            <p style="color: #666;">Ce lien expire dans <strong>24 heures</strong>.</p>
+            <p style="color: #666;">Si vous n'avez pas créé de compte, ignorez cet email.</p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+            <p style="color: #999; font-size: 12px;">
+                Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br>
+                <a href="{verify_url}" style="color: #4F46E5;">{verify_url}</a>
+            </p>
+        </div>
+        """
+    )
+    mail.send(msg)
 
 # ==================== ROUTES ====================
 
@@ -132,17 +80,21 @@ def signup():
         
         existing_user = users_collection.find_one({"email": email})
         if existing_user:
-            if existing_user.get('email_verified', False):
-                return jsonify({"error": "Cet email est déjà utilisé. Veuillez vous connecter."}), 400
-            else:
-                users_collection.delete_one({"_id": existing_user['_id']})
-                print(f"🗑️ Ancien compte non vérifié supprimé: {email}")
+            if not existing_user.get('email_verified'):
+                return jsonify({
+                    "error": "Un compte existe déjà avec cet email mais n'est pas encore vérifié.",
+                    "needs_verification": True,
+                    "email": email
+                }), 400
+            return jsonify({"error": "Cet email est déjà utilisé. Veuillez vous connecter."}), 400
         
         if username and users_collection.find_one({"username": username}):
             return jsonify({"error": "Ce nom d'utilisateur est déjà pris."}), 400
         
-        verification_code = generate_verification_code()
         hashed_password = generate_password_hash(password).decode('utf-8')
+        
+        verification_token = secrets.token_urlsafe(32)
+        token_expiry = datetime.datetime.utcnow() + datetime.timedelta(hours=24)
         
         user_data = {
             "username": username,
@@ -152,37 +104,24 @@ def signup():
             "created_at": datetime.datetime.utcnow().isoformat(),
             "email_verified": False,
             "active": False,
-            "verification_code": verification_code,
-            "verification_code_expiry": (datetime.datetime.utcnow() + datetime.timedelta(minutes=10)).isoformat()
+            "verification_token": verification_token,
+            "verification_token_expiry": token_expiry.isoformat()
         }
         
         result = users_collection.insert_one(user_data)
-        user_id = str(result.inserted_id)
         
-        email_sent = send_verification_email_with_code(email, username or email, verification_code)
+        try:
+            send_verification_email(email, verification_token)
+        except Exception as mail_err:
+            users_collection.delete_one({"_id": result.inserted_id})
+            print(f"❌ Mail error: {str(mail_err)}")
+            return jsonify({"error": f"Impossible d'envoyer l'email de vérification : {str(mail_err)}"}), 500
         
-        token = jwt.encode({
-            'user_id': user_id,
-            'email': email,
-            'role': role,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
-        }, current_app.config['SECRET_KEY'], algorithm='HS256')
-        
-        response_data = {
+        return jsonify({
             "success": True,
-            "message": "Inscription réussie ! Un code de vérification vous a été envoyé par email." if email_sent else "Inscription réussie mais l'email n'a pas pu être envoyé. Utilisez /debug-activate pour activer votre compte.",
-            "token": token,
-            "user": {
-                "_id": user_id,
-                "username": username,
-                "email": email,
-                "role": role,
-                "email_verified": False,
-                "active": False
-            }
-        }
-            
-        return jsonify(response_data), 201
+            "message": "Inscription réussie ! Vérifiez votre boîte email pour activer votre compte.",
+            "email": email
+        }), 201
         
     except Exception as e:
         print(f"❌ Signup error: {str(e)}")
@@ -190,120 +129,82 @@ def signup():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-@auth.route("/verify-email", methods=["POST", "OPTIONS"])
+
+@auth.route("/verify-email", methods=["GET", "OPTIONS"])
 def verify_email():
     if request.method == "OPTIONS":
         return jsonify({"message": "OK"}), 200
     
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        code = data.get('code')
-        
-        if not email or not code:
-            return jsonify({"error": "Email et code requis"}), 400
-        
-        user = users_collection.find_one({"email": email})
-        if not user:
-            return jsonify({"error": "Utilisateur non trouvé"}), 404
-        
-        if user.get('email_verified'):
-            return jsonify({"message": "Email déjà vérifié"}), 200
-        
-        stored_code = user.get('verification_code')
-        expiry_str = user.get('verification_code_expiry')
-        
-        if not stored_code or stored_code != code:
-            return jsonify({"error": "Code de vérification invalide"}), 400
-        
-        if expiry_str:
-            expiry = datetime.datetime.fromisoformat(expiry_str)
-            if datetime.datetime.utcnow() > expiry:
-                return jsonify({"error": "Code expiré. Veuillez demander un nouveau code."}), 400
-        
-        users_collection.update_one(
-            {"email": email},
-            {"$set": {
-                "email_verified": True,
-                "active": True,
-                "verified_at": datetime.datetime.utcnow().isoformat()
-            }}
-        )
-        
-        print(f"✅ Email vérifié avec code: {email}")
-        
-        return jsonify({"message": "Email vérifié avec succès ! Redirection vers la connexion..."}), 200
-        
-    except Exception as e:
-        print(f"❌ Erreur vérification: {str(e)}")
-        return jsonify({"error": "Erreur lors de la vérification"}), 500
+    token = request.args.get('token')
+    if not token:
+        return jsonify({"error": "Token manquant"}), 400
+    
+    user = users_collection.find_one({"verification_token": token})
+    if not user:
+        return jsonify({"error": "Token invalide ou déjà utilisé"}), 400
+    
+    expiry = user.get("verification_token_expiry")
+    if expiry and datetime.datetime.utcnow() > datetime.datetime.fromisoformat(expiry):
+        return jsonify({"error": "Token expiré. Veuillez demander un nouveau lien de vérification."}), 400
+    
+    users_collection.update_one(
+        {"_id": user["_id"]},
+        {"$set": {
+            "email_verified": True,
+            "active": True,
+            "verification_token": None,
+            "verification_token_expiry": None
+        }}
+    )
+    
+    base_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
+    return redirect(f"{base_url}/login?verified=true")
 
-@auth.route("/resend-code", methods=["POST", "OPTIONS"])
-def resend_code():
+
+@auth.route("/resend-verification", methods=["POST", "OPTIONS"])
+def resend_verification():
     if request.method == "OPTIONS":
         return jsonify({"message": "OK"}), 200
     
     try:
         data = request.get_json()
         email = data.get('email')
-        
         if not email:
             return jsonify({"error": "Email requis"}), 400
         
         user = users_collection.find_one({"email": email})
         if not user:
-            return jsonify({"error": "Utilisateur non trouvé"}), 404
+            return jsonify({"error": "Aucun compte trouvé avec cet email"}), 404
         
         if user.get('email_verified'):
-            return jsonify({"error": "Email déjà vérifié"}), 400
+            return jsonify({"message": "Cet email est déjà vérifié. Vous pouvez vous connecter."}), 200
         
-        new_code = generate_verification_code()
+        new_token = secrets.token_urlsafe(32)
+        new_expiry = datetime.datetime.utcnow() + datetime.timedelta(hours=24)
         
         users_collection.update_one(
-            {"email": email},
+            {"_id": user["_id"]},
             {"$set": {
-                "verification_code": new_code,
-                "verification_code_expiry": (datetime.datetime.utcnow() + datetime.timedelta(minutes=10)).isoformat()
+                "verification_token": new_token,
+                "verification_token_expiry": new_expiry.isoformat()
             }}
         )
         
-        email_sent = send_verification_email_with_code(email, user.get('username', email), new_code)
+        try:
+            send_verification_email(email, new_token)
+        except Exception as mail_err:
+            print(f"❌ Mail error: {str(mail_err)}")
+            return jsonify({"error": f"Impossible d'envoyer l'email : {str(mail_err)}"}), 500
         
-        if email_sent:
-            return jsonify({"message": "Nouveau code envoyé avec succès"}), 200
-        else:
-            return jsonify({"error": "Erreur d'envoi d'email"}), 500
+        return jsonify({
+            "success": True,
+            "message": "Email de vérification renvoyé. Vérifiez votre boîte mail."
+        }), 200
         
     except Exception as e:
-        print(f"❌ Erreur renvoi code: {str(e)}")
-        return jsonify({"error": "Erreur interne"}), 500
-
-@auth.route("/debug-activate", methods=["POST", "OPTIONS"])
-def debug_activate():
-    """Route pour activer un compte sans email (utiliser en cas de problème)"""
-    if request.method == "OPTIONS":
-        return jsonify({"message": "OK"}), 200
-    
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        
-        if not email:
-            return jsonify({"error": "Email requis"}), 400
-        
-        result = users_collection.update_one(
-            {"email": email},
-            {"$set": {"email_verified": True, "active": True}}
-        )
-        
-        if result.modified_count:
-            print(f"🔧 Compte activé manuellement: {email}")
-            return jsonify({"message": f"Compte {email} activé avec succès"}), 200
-        else:
-            return jsonify({"error": "Utilisateur non trouvé"}), 404
-            
-    except Exception as e:
+        print(f"❌ Resend error: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
 
 @auth.route("/login", methods=["POST", "OPTIONS"])
 def login():
@@ -324,13 +225,13 @@ def login():
         
         if not user.get('email_verified', False):
             return jsonify({
-                "error": "Veuillez vérifier votre email avant de vous connecter",
-                "email_unverified": True,
+                "error": "Veuillez vérifier votre email avant de vous connecter.",
+                "needs_verification": True,
                 "email": email
-            }), 403
+            }), 401
         
         if user.get('active') == False:
-            return jsonify({"error": "Compte désactivé"}), 401
+            return jsonify({"error": "Compte désactivé. Contactez l'administrateur."}), 401
         
         token = jwt.encode({
             'user_id': str(user['_id']),
@@ -348,13 +249,14 @@ def login():
                 "username": user.get('username'),
                 "email": user['email'],
                 "role": user.get('role', 'it_consultant'),
-                "email_verified": user.get('email_verified', False)
+                "email_verified": user.get('email_verified', True)
             }
         }), 200
         
     except Exception as e:
         print(f"❌ Login error: {str(e)}")
         return jsonify({"error": "Erreur interne du serveur"}), 500
+
 
 @auth.route("/google", methods=["POST", "OPTIONS"])
 def google_login():
@@ -439,6 +341,7 @@ def google_login():
         print(f"❌ Google auth error: {str(e)}")
         return jsonify({"success": False, "error": "Erreur d'authentification Google"}), 500
 
+
 @auth.route("/me", methods=["GET", "OPTIONS"])
 def get_me():
     if request.method == "OPTIONS":
@@ -470,6 +373,7 @@ def get_me():
         return jsonify({"error": "Token expiré"}), 401
     except jwt.InvalidTokenError:
         return jsonify({"error": "Token invalide"}), 401
+
 
 @auth.route("/check-email", methods=["POST", "OPTIONS"])
 def check_email():
