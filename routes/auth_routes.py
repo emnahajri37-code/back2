@@ -20,16 +20,14 @@ db = client["pfe_db"]
 users_collection = db["users"]
 # ==================== TEST MAIL ====================
 
-@auth.route("/test-mail", methods=["GET"])
+@@auth.route("/test-mail", methods=["GET"])
 def test_mail():
     try:
         mail = current_app.extensions.get('mail')
         print(f"MAIL_SERVER: {current_app.config.get('MAIL_SERVER')}")
-        print(f"MAIL_PORT: {current_app.config.get('MAIL_PORT')}")
         print(f"MAIL_USERNAME: {current_app.config.get('MAIL_USERNAME')}")
         print(f"MAIL_PASSWORD set: {bool(current_app.config.get('MAIL_PASSWORD'))}")
         print(f"MAIL_DEFAULT_SENDER: {current_app.config.get('MAIL_DEFAULT_SENDER')}")
-        
         msg = Message(
             subject="Test email",
             recipients=["ticketsystempfe@gmail.com"],
@@ -41,7 +39,6 @@ def test_mail():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 # ==================== HELPER ====================
 
 def send_verification_email(email, token):
