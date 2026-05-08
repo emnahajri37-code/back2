@@ -1,23 +1,17 @@
 import os
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail
-
 from routes.auth_routes import auth
 from routes.user_routes import user
 from routes.ticket_routes import ticket
 
 app = Flask(__name__)
-@app.after_request
-def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = 'https://sparkling-wisp-363896.netlify.app'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-    return response
+
 # ==================== CONFIGURATION ====================
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ma_super_cle_secrete_pour_les_tokens_12345!')
-app.config['BASE_URL'] = os.environ.get('BASE_URL', 'http://localhost:3000')
+app.config['BASE_URL'] = os.environ.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
 
 # Configuration email
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp-relay.brevo.com')
@@ -28,29 +22,33 @@ app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER')
 app.config['MAIL_TIMEOUT'] = 10
+app.config['MAIL_DEBUG'] = True
+
 # Initialisation
 bcrypt = Bcrypt(app)
 mail = Mail(app)
 app.extensions['mail'] = mail
 
-# ==================== CORS ====================
-# Permet UNIQUEMENT l'origine Netlify
+# ==================== CORS CORRIGÉ ====================
 CORS(app, 
      origins=["https://sparkling-wisp-363896.netlify.app"],
-     supports_credentials=False,
-     allow_headers=["Content-Type", "Authorization"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+     allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     supports_credentials=True)
 
 # ==================== ROUTES ====================
 @app.route("/")
 def home():
     return "Bienvenue sur le backend"
 
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
 app.register_blueprint(auth, url_prefix="/auth")
 app.register_blueprint(user, url_prefix="/user")
 app.register_blueprint(ticket, url_prefix="/tickets")
 
-# ==================== DEMARRAGE ====================
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port)
