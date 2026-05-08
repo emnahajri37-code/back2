@@ -14,6 +14,10 @@ users_collection = db["users"]
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # ✅ PERMET LES REQUÊTES OPTIONS (CORS PREFLIGHT)
+        if request.method == "OPTIONS":
+            return f(*args, **kwargs)
+        
         auth_header = request.headers.get("Authorization")
         if not auth_header:
             return jsonify({"message": "Token manquant"}), 401
