@@ -452,8 +452,6 @@ def get_me():
         return jsonify({"error": "Token expiré"}), 401
     except jwt.InvalidTokenError:
         return jsonify({"error": "Token invalide"}), 401
-
-# Ajoutez cette route de test ici
 @auth.route("/test-email", methods=["GET"])
 def test_email():
     """Route pour tester l'envoi d'email"""
@@ -461,17 +459,14 @@ def test_email():
         from flask_mail import Message
         msg = Message(
             subject="Test SMTP Brevo",
-            recipients=["emnahajri37@gmail.com"],  # Remplacez par votre email
-            body="Ceci est un test pour vérifier que SMTP fonctionne sur Render."
+            recipients=["emnahajri37@gmail.com"],
+            body="Ceci est un test."
         )
         mail = current_app.extensions['mail']
         mail.send(msg)
-        return jsonify({"message": "Email envoyé avec succès !"}), 200
+        return jsonify({"message": "Email envoyé !"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@auth.route("/check-email", methods=["POST", "OPTIONS"])
-def check_email():
 
 
 @auth.route("/check-email", methods=["POST", "OPTIONS"])
