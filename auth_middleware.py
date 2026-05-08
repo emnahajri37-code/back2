@@ -14,10 +14,16 @@ users_collection = db["users"]
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        # ✅ PERMET LES REQUÊTES OPTIONS (CORS PREFLIGHT)
+        # ✅ LA PREMIÈRE LIGNE DOIT GÉRER LES OPTIONS
         if request.method == "OPTIONS":
-            return f(*args, **kwargs)
+            response = current_app.make_default_options_response()
+            response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+            response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+            response.headers.add("Access-Control-Allow-Credentials", "true")
+            return response
         
+        # Ensuite seulement, vérification du token
         auth_header = request.headers.get("Authorization")
         if not auth_header:
             return jsonify({"message": "Token manquant"}), 401
