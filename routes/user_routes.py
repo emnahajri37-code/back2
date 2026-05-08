@@ -30,6 +30,28 @@ def _cors_response(response):
     response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     return response
 
+# ==================== DELETE USER (PLACÉ EN PREMIER) ====================
+@user.route("/<user_id>", methods=["DELETE", "OPTIONS"])
+@token_required
+def delete_user(current_user, user_id):
+    if request.method == "OPTIONS":
+        return _cors_response(current_app.make_default_options_response()), 200
+    
+    # Vérification des droits (admin ou IT consultant uniquement)
+    if current_user.get('role') not in ['admin', 'it_consultant']:
+        return _cors_response(jsonify({"error": "Action non autorisée. Droits administrateur requis."})), 403
+    
+    # Empêche la suppression de son propre compte
+    if str(current_user.get('_id')) == user_id:
+        return _cors_response(jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"})), 400
+    
+    result = users_collection.delete_one({"_id": ObjectId(user_id)})
+    
+    if result.deleted_count:
+        return _cors_response(jsonify({"message": "Utilisateur supprimé avec succès"})), 200
+    
+    return _cors_response(jsonify({"error": "Utilisateur non trouvé"})), 404
+
 # ==================== UPDATE USER ====================
 @user.route("/<user_id>", methods=["PUT", "OPTIONS"])
 @token_required
@@ -64,27 +86,43 @@ def update_user(current_user, user_id):
     user_updated["_id"] = str(user_updated["_id"])
     return _cors_response(jsonify({"message": "Utilisateur mis à jour", "user": user_updated})), 200
 
-# ==================== DELETE USER ====================
-@user.route("/<user_id>", methods=["DELETE", "OPTIONS"])
+# ==================== GET USER ====================
+@user.route("/<user_id>", methods=["GET", "OPTIONS"])
 @token_required
-def delete_user(current_user, user_id):
+def get_user(current_user, user_id):
     if request.method == "OPTIONS":
         return _cors_response(current_app.make_default_options_response()), 200
     
-    # Vérification des droits (admin ou IT consultant uniquement)
-    if current_user.get('role') not in ['admin', 'it_consultant']:
-        return _cors_response(jsonify({"error": "Action non autorisée. Droits administrateur requis."})), 403
+    user_data = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
+    if not user_data:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+    user_data["_id"] = str(user_data["_id"])
+    return jsonify(user_data), 200
+
+# ==================== GET ALL USERS ====================
+@user.route("/", methods=["GET", "OPTIONS"])
+@token_required
+def get_users(current_user):
+    if request.method == "OPTIONS":
+        return _cors_response(current_app.make_default_options_response()), 200
     
-    # Empêche la suppression de son propre compte
-    if str(current_user.get('_id')) == user_id:
-        return _cors_response(jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"})), 400
+    users = list(users_collection.find({}, {"password": 0}))
+    for u in users:
+        u["_id"] = str(u["_id"])
+    return jsonify(users), 200
+
+# ==================== GET MY PROFILE ====================
+@user.route("/profile", methods=["GET", "OPTIONS"])
+@token_required
+def get_my_profile(current_user):
+    if request.method == "OPTIONS":
+        return _cors_response(current_app.make_default_options_response()), 200
     
-    result = users_collection.delete_one({"_id": ObjectId(user_id)})
-    
-    if result.deleted_count:
-        return _cors_response(jsonify({"message": "Utilisateur supprimé avec succès"})), 200
-    
-    return _cors_response(jsonify({"error": "Utilisateur non trouvé"})), 404
+    user_data = users_collection.find_one({"_id": ObjectId(current_user["_id"])}, {"password": 0})
+    if not user_data:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+    user_data["_id"] = str(user_data["_id"])
+    return jsonify(user_data), 200
 
 # ==================== FORGOT PASSWORD ====================
 def generate_reset_token(email):
@@ -156,6 +194,23 @@ def reset_password():
     if update_user_password(email, hashed):
         return jsonify({'message': 'Mot de passe réinitialisé avec succès'}), 200
     return jsonify({'error': 'Erreur lors de la mise à jour'}), 500
-@user.route("/test-delete/<user_id>", methods=["DELETE"])
-def test_delete(user_id):
-    return jsonify({"message": f"DELETE test for {user_id}"}), 200
+
+# ==================== DEBUG TOKEN ====================
+@user.route("/debug-token", methods=["OPTIONS", "POST"])
+def debug_token():
+    if request.method == "OPTIONS":
+        return jsonify({"message": "OK"}), 200
+    data = request.get_json()
+    token = data.get('token')
+    if not token:
+        return jsonify({"error": "Token manquant"}), 400
+    try:
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'], options={"verify_exp": False})
+        return jsonify({
+            "valid_signature": True,
+            "payload": payload,
+            "email_field": payload.get('email'),
+            "user_id_field": payload.get('user_id')
+        })
+    except jwt.InvalidTokenError as e:
+        return jsonify({"error": str(e)}), 400
