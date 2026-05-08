@@ -4,7 +4,7 @@ from bson.objectid import ObjectId
 from auth_middleware import token_required
 import jwt
 import datetime
-from flask_bcrypt import generate_password_hash
+from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 import resend
 
@@ -23,6 +23,70 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY')
 if RESEND_API_KEY:
     resend.api_key = RESEND_API_KEY
 
+# ==================== HELPER CORS ====================
+def _cors_response(response):
+    response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    return response
+
+# ==================== UPDATE USER ====================
+@user.route("/<user_id>", methods=["PUT", "OPTIONS"])
+@token_required
+def update_user(current_user, user_id):
+    if request.method == "OPTIONS":
+        return _cors_response(current_app.make_default_options_response()), 200
+    
+    # Vérification des droits
+    if current_user.get('role') not in ['admin', 'it_consultant'] and str(current_user.get('_id')) != user_id:
+        return _cors_response(jsonify({"error": "Action non autorisée"})), 403
+    
+    data = request.json
+    if not data:
+        return _cors_response(jsonify({"error": "Données manquantes"})), 400
+    
+    # Champs autorisés
+    allowed_fields = ["username", "name", "role"]
+    update_data = {k: v for k, v in data.items() if k in allowed_fields}
+    
+    if "password" in data and data["password"]:
+        update_data["password"] = generate_password_hash(data["password"]).decode('utf-8')
+    
+    if not update_data:
+        return _cors_response(jsonify({"error": "Aucun champ valide"})), 400
+    
+    result = users_collection.update_one({"_id": ObjectId(user_id)}, {"$set": update_data})
+    
+    if result.matched_count == 0:
+        return _cors_response(jsonify({"error": "Utilisateur non trouvé"})), 404
+    
+    user_updated = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
+    user_updated["_id"] = str(user_updated["_id"])
+    return _cors_response(jsonify({"message": "Utilisateur mis à jour", "user": user_updated})), 200
+
+# ==================== DELETE USER ====================
+@user.route("/<user_id>", methods=["DELETE", "OPTIONS"])
+@token_required
+def delete_user(current_user, user_id):
+    if request.method == "OPTIONS":
+        return _cors_response(current_app.make_default_options_response()), 200
+    
+    # Vérification des droits (admin ou IT consultant uniquement)
+    if current_user.get('role') not in ['admin', 'it_consultant']:
+        return _cors_response(jsonify({"error": "Action non autorisée. Droits administrateur requis."})), 403
+    
+    # Empêche la suppression de son propre compte
+    if str(current_user.get('_id')) == user_id:
+        return _cors_response(jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"})), 400
+    
+    result = users_collection.delete_one({"_id": ObjectId(user_id)})
+    
+    if result.deleted_count:
+        return _cors_response(jsonify({"message": "Utilisateur supprimé avec succès"})), 200
+    
+    return _cors_response(jsonify({"error": "Utilisateur non trouvé"})), 404
+
+# ==================== FORGOT PASSWORD ====================
 def generate_reset_token(email):
     payload = {
         'email': email,
