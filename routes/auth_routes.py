@@ -21,7 +21,12 @@ db = client["pfe_db"]
 users_collection = db["users"]
 
 # ==================== CONFIGURATION RESEND ====================
-resend.api_key = os.environ.get('RESEND_API_KEY')
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY')
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
+    print("✅ Resend configuré avec succès")
+else:
+    print("❌ RESEND_API_KEY manquante")
 
 # ==================== FONCTIONS ====================
 def generate_verification_code():
@@ -31,27 +36,56 @@ def generate_verification_code():
 def send_verification_email(user_email, username, code):
     """Envoie un email via Resend"""
     try:
-        if not resend.api_key:
+        if not RESEND_API_KEY:
             print("❌ Clé API Resend manquante")
             return False
         
         params = {
             "from": "IT Support <onboarding@resend.dev>",
             "to": [user_email],
-            "subject": "🔐 Votre code de vérification",
+            "subject": "🔐 Votre code de vérification - IT Support System",
             "html": f"""
-            <h2>Bonjour {username} !</h2>
-            <p>Votre code de vérification est :</p>
-            <h1 style="font-size: 48px; letter-spacing: 10px;">{code}</h1>
-            <p>Ce code expirera dans 10 minutes.</p>
-            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <style>
+                    body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
+                    .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                    .header {{ background-color: #4CAF50; color: white; padding: 20px; text-align: center; }}
+                    .content {{ padding: 30px; background-color: #f9f9f9; text-align: center; }}
+                    .code {{ font-size: 48px; font-weight: bold; padding: 20px; background-color: #fff; border: 2px dashed #4CAF50; display: inline-block; margin: 20px 0; letter-spacing: 10px; }}
+                    .footer {{ text-align: center; padding: 20px; font-size: 12px; color: #888; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h2>IT Support System</h2>
+                    </div>
+                    <div class="content">
+                        <h3>Bonjour {username} !</h3>
+                        <p>Merci de vous être inscrit. Voici votre code de vérification :</p>
+                        <div class="code">{code}</div>
+                        <p>Ce code expirera dans <strong>10 minutes</strong>.</p>
+                        <p>Si vous n'avez pas créé de compte, ignorez cet email.</p>
+                    </div>
+                    <div class="footer">
+                        <p>© 2025 IT Support System</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
         }
         
-        resend.Emails.send(params)
-        print(f"✅ Email envoyé à {user_email}")
+        email = resend.Emails.send(params)
+        print(f"✅ Email envoyé via Resend à {user_email} - Code: {code}")
+        print(f"📨 Réponse: {email}")
         return True
+        
     except Exception as e:
-        print(f"❌ Erreur: {str(e)}")
+        print(f"❌ Erreur Resend: {str(e)}")
         return False
 
 # ==================== ROUTES ====================
@@ -63,23 +97,31 @@ def signup():
     
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({"error": "Données JSON manquantes"}), 400
+            
         username = data.get('username') or data.get('name') or data.get('fullName')
         email = data.get('email')
         password = data.get('password')
         role = data.get('role', 'it_consultant')
-
+        
         if not email or not password:
             return jsonify({"error": "Email et mot de passe requis"}), 400
-
-        if users_collection.find_one({"email": email}):
-            return jsonify({"error": "Cet email est déjà utilisé."}), 400
-
+        
+        existing_user = users_collection.find_one({"email": email})
+        if existing_user:
+            if existing_user.get('email_verified', False):
+                return jsonify({"error": "Cet email est déjà utilisé. Veuillez vous connecter."}), 400
+            else:
+                users_collection.delete_one({"_id": existing_user['_id']})
+                print(f"🗑️ Ancien compte non vérifié supprimé: {email}")
+        
         if username and users_collection.find_one({"username": username}):
             return jsonify({"error": "Ce nom d'utilisateur est déjà pris."}), 400
-
-        hashed_password = generate_password_hash(password).decode('utf-8')
+        
         verification_code = generate_verification_code()
-
+        hashed_password = generate_password_hash(password).decode('utf-8')
+        
         user_data = {
             "username": username,
             "email": email,
@@ -91,32 +133,36 @@ def signup():
             "verification_code": verification_code,
             "verification_code_expiry": (datetime.datetime.utcnow() + datetime.timedelta(minutes=10)).isoformat()
         }
-
+        
         result = users_collection.insert_one(user_data)
         user_id = str(result.inserted_id)
-
+        
+        # Envoi de l'email avec Resend
         send_verification_email(email, username or email, verification_code)
-
+        
         token = jwt.encode({
             'user_id': user_id,
             'email': email,
             'role': role,
             'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
         }, current_app.config['SECRET_KEY'], algorithm='HS256')
-
-        return jsonify({
+        
+        response_data = {
             "success": True,
-            "message": "Inscription réussie ! Un code vous a été envoyé.",
+            "message": "Inscription réussie ! Un code de vérification vous a été envoyé par email.",
             "token": token,
             "user": {
                 "_id": user_id,
                 "username": username,
                 "email": email,
                 "role": role,
-                "email_verified": False
+                "email_verified": False,
+                "active": False
             }
-        }), 201
-
+        }
+            
+        return jsonify(response_data), 201
+        
     except Exception as e:
         print(f"❌ Signup error: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -141,16 +187,95 @@ def verify_email():
         if user.get('email_verified'):
             return jsonify({"message": "Email déjà vérifié"}), 200
         
-        if user.get('verification_code') != code:
-            return jsonify({"error": "Code invalide"}), 400
+        stored_code = user.get('verification_code')
+        expiry_str = user.get('verification_code_expiry')
+        
+        if not stored_code or stored_code != code:
+            return jsonify({"error": "Code de vérification invalide"}), 400
+        
+        if expiry_str:
+            expiry = datetime.datetime.fromisoformat(expiry_str)
+            if datetime.datetime.utcnow() > expiry:
+                return jsonify({"error": "Code expiré. Veuillez demander un nouveau code."}), 400
         
         users_collection.update_one(
+            {"email": email},
+            {"$set": {
+                "email_verified": True,
+                "active": True,
+                "verified_at": datetime.datetime.utcnow().isoformat()
+            }}
+        )
+        
+        print(f"✅ Email vérifié avec code: {email}")
+        
+        return jsonify({"message": "Email vérifié avec succès ! Redirection vers la connexion..."}), 200
+        
+    except Exception as e:
+        print(f"❌ Erreur vérification: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@auth.route("/resend-code", methods=["POST", "OPTIONS"])
+def resend_code():
+    if request.method == "OPTIONS":
+        return jsonify({"message": "OK"}), 200
+    
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        
+        if not email:
+            return jsonify({"error": "Email requis"}), 400
+        
+        user = users_collection.find_one({"email": email})
+        if not user:
+            return jsonify({"error": "Utilisateur non trouvé"}), 404
+        
+        if user.get('email_verified'):
+            return jsonify({"error": "Email déjà vérifié"}), 400
+        
+        new_code = generate_verification_code()
+        
+        users_collection.update_one(
+            {"email": email},
+            {"$set": {
+                "verification_code": new_code,
+                "verification_code_expiry": (datetime.datetime.utcnow() + datetime.timedelta(minutes=10)).isoformat()
+            }}
+        )
+        
+        send_verification_email(email, user.get('username', email), new_code)
+        
+        return jsonify({"message": "Nouveau code envoyé avec succès"}), 200
+        
+    except Exception as e:
+        print(f"❌ Erreur renvoi code: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@auth.route("/debug-activate", methods=["POST", "OPTIONS"])
+def debug_activate():
+    """Route pour activer un compte sans email"""
+    if request.method == "OPTIONS":
+        return jsonify({"message": "OK"}), 200
+    
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        
+        if not email:
+            return jsonify({"error": "Email requis"}), 400
+        
+        result = users_collection.update_one(
             {"email": email},
             {"$set": {"email_verified": True, "active": True}}
         )
         
-        return jsonify({"message": "Email vérifié avec succès !"}), 200
-        
+        if result.modified_count:
+            print(f"🔧 Compte activé manuellement: {email}")
+            return jsonify({"message": f"Compte {email} activé avec succès"}), 200
+        else:
+            return jsonify({"error": "Utilisateur non trouvé"}), 404
+            
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -163,24 +288,31 @@ def login():
         data = request.get_json()
         email = data.get('email')
         password = data.get('password')
-
+        
         if not email or not password:
             return jsonify({"error": "Email et mot de passe requis"}), 400
-
+        
         user = users_collection.find_one({"email": email})
         if not user or not check_password_hash(user['password'], password):
             return jsonify({"error": "Email ou mot de passe incorrect"}), 401
-
-        if not user.get('email_verified'):
-            return jsonify({"error": "Veuillez vérifier votre email avant de vous connecter"}), 403
-
+        
+        if not user.get('email_verified', False):
+            return jsonify({
+                "error": "Veuillez vérifier votre email avant de vous connecter",
+                "email_unverified": True,
+                "email": email
+            }), 403
+        
+        if user.get('active') == False:
+            return jsonify({"error": "Compte désactivé"}), 401
+        
         token = jwt.encode({
             'user_id': str(user['_id']),
             'email': user['email'],
             'role': user.get('role', 'it_consultant'),
             'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
         }, current_app.config['SECRET_KEY'], algorithm='HS256')
-
+        
         return jsonify({
             "success": True,
             "message": "Connexion réussie",
@@ -189,80 +321,14 @@ def login():
                 "_id": str(user['_id']),
                 "username": user.get('username'),
                 "email": user['email'],
-                "role": user.get('role', 'it_consultant')
+                "role": user.get('role', 'it_consultant'),
+                "email_verified": user.get('email_verified', False)
             }
         }), 200
-
+        
     except Exception as e:
         print(f"❌ Login error: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
-@auth.route("/google", methods=["POST", "OPTIONS"])
-def google_login():
-    if request.method == "OPTIONS":
-        return jsonify({"message": "OK"}), 200
-    
-    try:
-        data = request.get_json()
-        id_token_credential = data.get('id_token') or data.get('credential')
-        
-        if not id_token_credential:
-            return jsonify({"error": "Token Google manquant"}), 400
-        
-        from google.oauth2 import id_token
-        from google.auth.transport import requests as google_requests
-        
-        GOOGLE_CLIENT_ID = "84499611206-pquink4aps0ked49ngi5t3rqk5p6ho6v.apps.googleusercontent.com"
-        info = id_token.verify_oauth2_token(id_token_credential, google_requests.Request(), GOOGLE_CLIENT_ID)
-        
-        email = info.get('email')
-        name = info.get('name')
-        google_id = info.get('sub')
-        role = data.get('role', 'developer')
-        
-        user = users_collection.find_one({"email": email})
-        
-        if not user:
-            user_data = {
-                "username": name,
-                "email": email,
-                "google_id": google_id,
-                "role": role,
-                "created_at": datetime.datetime.utcnow().isoformat(),
-                "email_verified": True,
-                "active": True
-            }
-            result = users_collection.insert_one(user_data)
-            user_id = str(result.inserted_id)
-            user_role = role
-            user_username = name
-        else:
-            user_id = str(user['_id'])
-            user_role = user.get('role')
-            user_username = user.get('username', name)
-        
-        token = jwt.encode({
-            'user_id': user_id,
-            'email': email,
-            'role': user_role,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
-        }, current_app.config['SECRET_KEY'], algorithm='HS256')
-        
-        return jsonify({
-            "success": True,
-            "message": "Connexion Google réussie",
-            "token": token,
-            "user": {
-                "_id": user_id,
-                "username": user_username,
-                "email": email,
-                "role": user_role
-            }
-        }), 200
-        
-    except Exception as e:
-        print(f"❌ Google auth error: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), 500
 
 @auth.route("/me", methods=["GET", "OPTIONS"])
 def get_me():
@@ -273,10 +339,18 @@ def get_me():
     if not auth_header:
         return jsonify({"error": "Token manquant"}), 401
     
-    token = auth_header.split()[1]
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return jsonify({"error": "Format token invalide"}), 401
+    
+    token = parts[1]
     try:
         data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
-        user = users_collection.find_one({"_id": ObjectId(data['user_id'])}, {"password": 0})
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({"error": "Token invalide"}), 401
+        
+        user = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
         if not user:
             return jsonify({"error": "Utilisateur non trouvé"}), 404
         
@@ -285,8 +359,8 @@ def get_me():
         
     except jwt.ExpiredSignatureError:
         return jsonify({"error": "Token expiré"}), 401
-    except Exception as e:
-        return jsonify({"error": str(e)}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Token invalide"}), 401
 
 @auth.route("/check-email", methods=["POST", "OPTIONS"])
 def check_email():
@@ -303,7 +377,8 @@ def check_email():
         return jsonify({
             "exists": user is not None,
             "email": email,
-            "role": user.get('role') if user else None
+            "role": user.get('role') if user else None,
+            "verified": user.get('email_verified') if user else False
         }), 200
         
     except Exception as e:
