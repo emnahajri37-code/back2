@@ -8,6 +8,8 @@ from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import os
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 
 auth = Blueprint("auth", __name__)
 
@@ -20,27 +22,51 @@ client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 users_collection = db["users"]
 
+# ==================== CONFIGURATION BREVO ====================
+BREVO_API_KEY = os.environ.get('BREVO_API_KEY')
+if BREVO_API_KEY:
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = BREVO_API_KEY
+    print("✅ Brevo configuré")
+else:
+    print("❌ BREVO_API_KEY manquante")
+
 # ==================== FONCTIONS ====================
 def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
 def send_verification_email(user_email, username, code):
     try:
-        msg = Message(
+        if not BREVO_API_KEY:
+            print("❌ Pas de clé Brevo")
+            return False
+        
+        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+        
+        email_obj = sib_api_v3_sdk.SendSmtpEmail(
+            to=[{"email": user_email}],
+            sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
             subject="🔐 Votre code de vérification",
-            recipients=[user_email],
-            html=f"""
+            html_content=f"""
+            <html>
+            <body>
             <h2>Bonjour {username} !</h2>
-            <p>Voici votre code de vérification : <strong>{code}</strong></p>
+            <p>Voici votre code de vérification : <strong style="font-size:24px">{code}</strong></p>
             <p>Ce code expire dans 10 minutes.</p>
+            <p>Si vous n'avez pas créé de compte, ignorez cet email.</p>
+            </body>
+            </html>
             """
         )
-        mail = current_app.extensions.get('mail')
-        mail.send(msg)
+        
+        api_instance.send_transac_email(email_obj)
         print(f"✅ Email envoyé à {user_email}")
         return True
+    except ApiException as e:
+        print(f"❌ Erreur Brevo API: {e.body}")
+        return False
     except Exception as e:
-        print(f"❌ Erreur envoi email: {e}")
+        print(f"❌ Erreur: {e}")
         return False
 
 # ==================== ROUTES ====================
@@ -141,84 +167,6 @@ def login():
             "user": {"_id": str(user['_id']), "username": user.get('username'), "email": user['email'], "role": user.get('role')}
         }), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# ==================== ROUTE GOOGLE OAUTH ====================
-@auth.route("/google", methods=["POST", "OPTIONS"])
-def google_login():
-    if request.method == "OPTIONS":
-        return jsonify({"message": "OK"}), 200
-    
-    try:
-        data = request.get_json()
-        id_token_credential = data.get('credential') or data.get('id_token')
-        
-        if not id_token_credential:
-            return jsonify({"error": "Token Google manquant"}), 400
-        
-        # Vérification du token Google
-        from google.oauth2 import id_token
-        from google.auth.transport import requests as google_requests
-        
-        GOOGLE_CLIENT_ID = "84499611206-pquink4aps0ked49ngi5t3rqk5p6ho6v.apps.googleusercontent.com"
-        info = id_token.verify_oauth2_token(id_token_credential, google_requests.Request(), GOOGLE_CLIENT_ID)
-        
-        email = info.get('email')
-        name = info.get('name')
-        role = data.get('role', 'developer')
-        
-        if not email:
-            return jsonify({"error": "Email non fourni par Google"}), 400
-        
-        # Vérifie si l'utilisateur existe
-        user = users_collection.find_one({"email": email})
-        
-        if not user:
-            # Création d'un nouvel utilisateur
-            user_data = {
-                "username": name,
-                "email": email,
-                "role": role,
-                "email_verified": True,
-                "active": True,
-                "created_at": datetime.datetime.utcnow().isoformat()
-            }
-            result = users_collection.insert_one(user_data)
-            user_id = str(result.inserted_id)
-            user_role = role
-            user_username = name
-        else:
-            # L'email existe déjà → vérifie le rôle
-            if user.get('role') != role:
-                return jsonify({
-                    "error": f"Cet email est déjà utilisé pour un compte {user.get('role')}. Veuillez vous connecter avec celui-ci."
-                }), 400
-            user_id = str(user['_id'])
-            user_role = user.get('role')
-            user_username = user.get('username')
-        
-        # Génération du token JWT
-        token = jwt.encode({
-            'user_id': user_id,
-            'email': email,
-            'role': user_role,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
-        }, current_app.config['SECRET_KEY'], algorithm='HS256')
-        
-        return jsonify({
-            "success": True,
-            "message": "Connexion Google réussie",
-            "token": token,
-            "user": {
-                "_id": user_id,
-                "username": user_username,
-                "email": email,
-                "role": user_role
-            }
-        }), 200
-        
-    except Exception as e:
-        print(f"❌ Google auth error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # ==================== ROUTES ME ET CHECK-EMAIL ====================
