@@ -5,7 +5,7 @@ import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
 from pymongo import MongoClient
-import resend
+
 
 user = Blueprint("user", __name__)
 
@@ -212,51 +212,39 @@ def user_by_id(user_id):
         return jsonify({"error": str(e)}), 500
 
 # ==================== FORGOT PASSWORD ====================
-@user.route("/forgot-password", methods=["POST"])
+@user.route("/forgot-password", methods=["POST", "OPTIONS"])
 def forgot_password():
+    if request.method == "OPTIONS":
+        return jsonify({"message": "OK"}), 200
+    
     data = request.get_json()
-    if not data:
-        return jsonify({'error': 'Corps de requête invalide'}), 400
-
     email = data.get('email', '').strip().lower()
     if not email:
         return jsonify({'error': 'Email requis'}), 400
-
-    user_doc = users_collection.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}})
-    if not user_doc:
+    
+    user = users_collection.find_one({"email": email})
+    if not user:
         return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
-
+    
     token = generate_reset_token(email)
     base_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
     reset_link = f"{base_url}/reset-password?token={token}"
-
+    
+    # ✅ UTILISE FLASK-MAIL (GMAIL) au lieu de RESEND
     try:
-        if RESEND_API_KEY:
-            resend.Emails.send({
-                "from": "IT Support <onboarding@resend.dev>",
-                "to": [email],
-                "subject": "Réinitialisation de votre mot de passe",
-                "html": f"""
-                    <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:32px;">
-                        <h2 style="color:#4F46E5;">Réinitialisation de mot de passe</h2>
-                        <p>Bonjour,</p>
-                        <p>Cliquez sur le bouton ci-dessous pour réinitialiser votre mot de passe :</p>
-                        <a href="{reset_link}" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:white;text-decoration:none;border-radius:6px;">
-                            Réinitialiser mon mot de passe
-                        </a>
-                        <p style="color:#6b7280;font-size:14px;margin-top:16px;">Ce lien expire dans 1 heure.</p>
-                        <p>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
-                    </div>
-                """
-            })
-            print(f"✅ Email envoyé à {email}")
-        else:
-            print(f"🔑 Reset link: {reset_link}")
+        from flask_mail import Message
+        msg = Message(
+            subject="Réinitialisation de votre mot de passe",
+            recipients=[email],
+            html=f"<p>Cliquez sur ce lien : <a href='{reset_link}'>{reset_link}</a></p>"
+        )
+        mail = current_app.extensions.get('mail')
+        mail.send(msg)
+        print(f"✅ Email envoyé à {email}")
     except Exception as e:
         print(f"❌ Erreur envoi email: {e}")
-
+    
     return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
-
 # ==================== RESET PASSWORD ====================
 @user.route("/reset-password", methods=["POST"])
 def reset_password():
