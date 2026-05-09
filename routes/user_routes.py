@@ -122,7 +122,8 @@ def user_by_id(current_user, user_id):
             if current_user.get('role') not in ['admin', 'it_consultant']:
                 return jsonify({"error": "Action non autorisée. Droits administrateur requis."}), 403
 
-            if str(current_user.get('_id')) == user_id:
+            current_user_id = str(current_user.get('_id') or current_user.get('user_id', ''))
+            if current_user_id == user_id:
                 return jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"}), 400
 
             result = users_collection.delete_one({"_id": ObjectId(user_id)})
