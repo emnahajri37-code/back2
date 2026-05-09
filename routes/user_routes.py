@@ -307,3 +307,42 @@ def debug_token():
         })
     except jwt.InvalidTokenError as e:
         return jsonify({"error": str(e)}), 400
+# ==================== SUPPRESSION COMPTE (POST au lieu de DELETE) ====================
+@user.route("/delete-account/<user_id>", methods=["POST", "OPTIONS"])
+def delete_account(user_id):
+    if request.method == "OPTIONS":
+        response = current_app.make_default_options_response()
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return response, 200
+    
+    # Récupérer le token
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+    
+    try:
+        token = auth_header.split()[1]
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        current_user_role = payload.get('role')
+        current_user_id = payload.get('user_id')
+        
+        if current_user_role not in ['admin', 'it_consultant']:
+            return jsonify({"error": "Action non autorisée. Droits administrateur requis."}), 403
+        
+        if str(current_user_id) == user_id:
+            return jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"}), 400
+        
+        from bson.objectid import ObjectId
+        result = users_collection.delete_one({"_id": ObjectId(user_id)})
+        
+        if result.deleted_count:
+            return jsonify({"message": "Utilisateur supprimé avec succès"}), 200
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+        
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token expiré"}), 401
+    except Exception as e:
+        print(f"Erreur suppression: {str(e)}")
+        return jsonify({"error": str(e)}), 500
