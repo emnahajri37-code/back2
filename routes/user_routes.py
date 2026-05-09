@@ -347,10 +347,14 @@ def delete_account(user_id):
         print(f"Erreur suppression: {str(e)}")
         return jsonify({"error": str(e)}), 500
 # ==================== SUPPRESSION SIMPLE (POST) ====================
+# ==================== SUPPRESSION SIMPLE (POST) ====================
 @user.route("/delete-me", methods=["POST", "OPTIONS"])
 def delete_me():
     if request.method == "OPTIONS":
         response = current_app.make_default_options_response()
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         return response, 200
     
     auth_header = request.headers.get("Authorization")
@@ -370,7 +374,7 @@ def delete_me():
         return jsonify({"error": "Compte non trouvé"}), 404
         
     except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Token expiré"}), 401
+        return jsonify({"error": "Token expiré, veuillez vous reconnecter"}), 401
     except Exception as e:
         print(f"Erreur suppression: {str(e)}")
         return jsonify({"error": str(e)}), 500
