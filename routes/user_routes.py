@@ -346,3 +346,31 @@ def delete_account(user_id):
     except Exception as e:
         print(f"Erreur suppression: {str(e)}")
         return jsonify({"error": str(e)}), 500
+# ==================== SUPPRESSION SIMPLE (POST) ====================
+@user.route("/delete-me", methods=["POST", "OPTIONS"])
+def delete_me():
+    if request.method == "OPTIONS":
+        response = current_app.make_default_options_response()
+        return response, 200
+    
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+    
+    try:
+        token = auth_header.split()[1]
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        user_id = payload.get('user_id')
+        
+        from bson.objectid import ObjectId
+        result = users_collection.delete_one({"_id": ObjectId(user_id)})
+        
+        if result.deleted_count:
+            return jsonify({"message": "Compte supprimé avec succès"}), 200
+        return jsonify({"error": "Compte non trouvé"}), 404
+        
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token expiré"}), 401
+    except Exception as e:
+        print(f"Erreur suppression: {str(e)}")
+        return jsonify({"error": str(e)}), 500
