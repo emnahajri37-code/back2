@@ -36,11 +36,11 @@ def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
 def send_verification_email(user_email, username, code):
+    if not BREVO_API_KEY:
+        print("❌ Pas de clé Brevo")
+        return False
+    
     try:
-        if not BREVO_API_KEY:
-            print("❌ Pas de clé Brevo")
-            return False
-        
         api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
         
         email_obj = sib_api_v3_sdk.SendSmtpEmail(
@@ -48,29 +48,22 @@ def send_verification_email(user_email, username, code):
             sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
             subject="🔐 Votre code de vérification",
             html_content=f"""
-            <html>
-            <body>
             <h2>Bonjour {username} !</h2>
-            <p>Voici votre code de vérification : <strong style="font-size:24px">{code}</strong></p>
-            <p>Ce code expire dans 10 minutes.</p>
-            <p>Si vous n'avez pas créé de compte, ignorez cet email.</p>
-            </body>
-            </html>
+            <p>Votre code : <strong style="font-size:24px">{code}</strong></p>
+            <p>Valable 10 minutes.</p>
             """
         )
-        
         api_instance.send_transac_email(email_obj)
         print(f"✅ Email envoyé à {user_email}")
         return True
     except ApiException as e:
-        print(f"❌ Erreur Brevo API: {e.body}")
+        print(f"❌ Erreur Brevo: {e.body}")
         return False
     except Exception as e:
         print(f"❌ Erreur: {e}")
         return False
 
 # ==================== ROUTES ====================
-
 @auth.route("/signup", methods=["POST", "OPTIONS"])
 def signup():
     if request.method == "OPTIONS":
@@ -169,7 +162,6 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ==================== ROUTES ME ET CHECK-EMAIL ====================
 @auth.route("/me", methods=["GET", "OPTIONS"])
 def get_me():
     if request.method == "OPTIONS":
