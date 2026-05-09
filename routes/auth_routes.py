@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
+from flask_mail import Message
 import jwt
 import datetime
 import random
@@ -7,7 +8,6 @@ from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import os
-import resend
 
 auth = Blueprint("auth", __name__)
 
@@ -20,36 +20,27 @@ client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 users_collection = db["users"]
 
-# ==================== CONFIGURATION RESEND ====================
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY')
-if RESEND_API_KEY:
-    resend.api_key = RESEND_API_KEY
-    print("✅ Resend configuré")
-else:
-    print("❌ RESEND_API_KEY manquante")
-
 # ==================== FONCTIONS ====================
 def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
 def send_verification_email(user_email, username, code):
     try:
-        if not RESEND_API_KEY:
-            return False
-        resend.Emails.send({
-            "from": "IT Support <onboarding@resend.dev>",
-            "to": [user_email],
-            "subject": "🔐 Votre code de vérification",
-            "html": f"""
+        msg = Message(
+            subject="🔐 Votre code de vérification",
+            recipients=[user_email],
+            html=f"""
             <h2>Bonjour {username} !</h2>
             <p>Voici votre code de vérification : <strong>{code}</strong></p>
-            <p>Code valable 10 minutes.</p>
+            <p>Ce code expire dans 10 minutes.</p>
             """
-        })
+        )
+        mail = current_app.extensions.get('mail')
+        mail.send(msg)
         print(f"✅ Email envoyé à {user_email}")
         return True
     except Exception as e:
-        print(f"❌ Erreur Resend: {e}")
+        print(f"❌ Erreur envoi email: {e}")
         return False
 
 # ==================== ROUTES ====================
