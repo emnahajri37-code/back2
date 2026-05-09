@@ -1,7 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 import os
 from bson.objectid import ObjectId
-from auth_middleware import token_required
 import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
@@ -49,21 +48,96 @@ def update_user_password(email, hashed_password):
     )
     return result.modified_count > 0
 
+# ==================== DELETE USER (ROUTE SÉPARÉE) ====================
+@user.route("/delete/<user_id>", methods=["DELETE", "OPTIONS"])
+def delete_user_by_id(user_id):
+    if request.method == "OPTIONS":
+        response = current_app.make_default_options_response()
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return response, 200
+    
+    # Récupérer le token manuellement
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+    
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return jsonify({"error": "Format token invalide"}), 401
+    
+    token = parts[1]
+    
+    try:
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        current_user_id = payload.get('user_id')
+        current_user_role = payload.get('role')
+        
+        # Vérification des droits
+        if current_user_role not in ['admin', 'it_consultant']:
+            return jsonify({"error": "Action non autorisée. Droits administrateur requis."}), 403
+        
+        # Empêche la suppression de son propre compte
+        if str(current_user_id) == user_id:
+            return jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"}), 400
+        
+        result = users_collection.delete_one({"_id": ObjectId(user_id)})
+        if result.deleted_count:
+            return jsonify({"message": "Utilisateur supprimé avec succès"}), 200
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+        
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token expiré"}), 401
+    except Exception as e:
+        print(f"Erreur suppression: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 # ==================== GET ALL USERS ====================
 @user.route("/", methods=["GET"])
-@token_required
-def get_users(current_user):
-    users = list(users_collection.find({}, {"password": 0}))
-    for u in users:
-        u["_id"] = str(u["_id"])
-    return jsonify(users), 200
+def get_users():
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+    
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return jsonify({"error": "Format token invalide"}), 401
+    
+    token = parts[1]
+    
+    try:
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        current_user_role = payload.get('role')
+        
+        if current_user_role not in ['admin', 'it_consultant']:
+            return jsonify({"error": "Action non autorisée"}), 403
+        
+        users = list(users_collection.find({}, {"password": 0}))
+        for u in users:
+            u["_id"] = str(u["_id"])
+        return jsonify(users), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ==================== GET MY PROFILE ====================
 @user.route("/profile", methods=["GET"])
-@token_required
-def get_my_profile(current_user):
+def get_my_profile():
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+    
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return jsonify({"error": "Format token invalide"}), 401
+    
+    token = parts[1]
+    
     try:
-        user_data = users_collection.find_one({"_id": ObjectId(current_user["_id"])}, {"password": 0})
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        user_id = payload.get('user_id')
+        
+        user_data = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
         if not user_data:
             return jsonify({"error": "Utilisateur non trouvé"}), 404
         user_data["_id"] = str(user_data["_id"])
@@ -71,68 +145,71 @@ def get_my_profile(current_user):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ==================== GET / PUT / DELETE USER ====================
-@user.route("/<user_id>", methods=["GET", "PUT", "DELETE"])
-@token_required
-def user_by_id(current_user, user_id):
-    if request.method == "GET":
-        try:
+# ==================== GET / PUT USER ====================
+@user.route("/<user_id>", methods=["GET", "PUT", "OPTIONS"])
+def user_by_id(user_id):
+    if request.method == "OPTIONS":
+        response = current_app.make_default_options_response()
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return response, 200
+    
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+    
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return jsonify({"error": "Format token invalide"}), 401
+    
+    token = parts[1]
+    
+    try:
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        current_user_id = payload.get('user_id')
+        current_user_role = payload.get('role')
+        
+        if request.method == "GET":
             user_data = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
             if not user_data:
                 return jsonify({"error": "Utilisateur non trouvé"}), 404
             user_data["_id"] = str(user_data["_id"])
             return jsonify(user_data), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
-    if request.method == "PUT":
-        try:
-            if current_user.get('role') not in ['admin', 'it_consultant'] and str(current_user.get('_id')) != user_id:
+        
+        if request.method == "PUT":
+            # Vérification des droits
+            if current_user_role not in ['admin', 'it_consultant'] and str(current_user_id) != user_id:
                 return jsonify({"error": "Action non autorisée"}), 403
-
+            
             data = request.json
             if not data:
                 return jsonify({"error": "Données manquantes"}), 400
-
+            
             allowed_fields = ["username", "name", "email", "phone", "location"]
             update_data = {k: v for k, v in data.items() if k in allowed_fields and v is not None}
-
+            
             if "password" in data and data["password"]:
                 if len(data["password"]) < 6:
                     return jsonify({"error": "Le mot de passe doit contenir au moins 6 caractères"}), 400
                 update_data["password"] = generate_password_hash(data["password"]).decode('utf-8')
-
+            
             if not update_data:
                 return jsonify({"error": "Aucun champ valide à mettre à jour"}), 400
-
+            
             result = users_collection.update_one({"_id": ObjectId(user_id)}, {"$set": update_data})
             if result.matched_count == 0:
                 return jsonify({"error": "Utilisateur non trouvé"}), 404
-
+            
             user_updated = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
             if user_updated:
                 user_updated["_id"] = str(user_updated["_id"])
             return jsonify({"message": "Utilisateur mis à jour", "user": user_updated}), 200
-
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
-    if request.method == "DELETE":
-        try:
-            if current_user.get('role') not in ['admin', 'it_consultant']:
-                return jsonify({"error": "Action non autorisée. Droits administrateur requis."}), 403
-
-            current_user_id = str(current_user.get('_id') or current_user.get('user_id', ''))
-            if current_user_id == user_id:
-                return jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"}), 400
-
-            result = users_collection.delete_one({"_id": ObjectId(user_id)})
-            if result.deleted_count:
-                return jsonify({"message": "Utilisateur supprimé avec succès"}), 200
-            return jsonify({"error": "Utilisateur non trouvé"}), 404
-
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token expiré"}), 401
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ==================== FORGOT PASSWORD ====================
 @user.route("/forgot-password", methods=["POST"])
@@ -162,11 +239,13 @@ def forgot_password():
                 "html": f"""
                     <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:32px;">
                         <h2 style="color:#4F46E5;">Réinitialisation de mot de passe</h2>
+                        <p>Bonjour,</p>
                         <p>Cliquez sur le bouton ci-dessous pour réinitialiser votre mot de passe :</p>
                         <a href="{reset_link}" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:white;text-decoration:none;border-radius:6px;">
                             Réinitialiser mon mot de passe
                         </a>
                         <p style="color:#6b7280;font-size:14px;margin-top:16px;">Ce lien expire dans 1 heure.</p>
+                        <p>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
                     </div>
                 """
             })
