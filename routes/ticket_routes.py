@@ -120,7 +120,7 @@ def create_ticket_route(current_user):
     ticket_record = create_ticket(
         subject, body, priority, priority_predicted,
         user_id=str(current_user["_id"]),
-        user_name=current_user.get("name", "Développeur"),
+        user_name=current_user.get("username") or current_user.get("name") or "Inconnu",
         user_email=current_user.get("email", ""),
         type_personnalise=type_personnalise,
         score_confiance=confidence,
