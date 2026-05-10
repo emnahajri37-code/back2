@@ -5,27 +5,25 @@ import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
 from pymongo import MongoClient
-import sib_api_v3_sdk
-from sib_api_v3_sdk.rest import ApiException
+import resend
 
 user = Blueprint("user", __name__)
 
 # ==================== CONNEXION MONGODB ====================
 mongo_uri = os.environ.get('MONGO_URI')
 if not mongo_uri:
-    raise ValueError("❌ MONGO_URI n'est pas définie!")
+    raise ValueError("❌ MONGO_URI non définie!")
 client = MongoClient(mongo_uri)
 db = client["pfe_db"]
 users_collection = db["users"]
 
-# ==================== CONFIGURATION BREVO ====================
-BREVO_API_KEY = os.environ.get('BREVO_API_KEY')
-if BREVO_API_KEY:
-    configuration = sib_api_v3_sdk.Configuration()
-    configuration.api_key['api-key'] = BREVO_API_KEY
-    print("✅ Brevo configuré")
+# ==================== CONFIGURATION RESEND ====================
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY')
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
+    print("✅ Resend configuré")
 else:
-    print("❌ BREVO_API_KEY manquante")
+    print("❌ RESEND_API_KEY manquante")
 
 # ==================== HELPER: TOKENS ====================
 def generate_reset_token(email):
@@ -185,25 +183,21 @@ def forgot_password():
         return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
     token = generate_reset_token(email)
-    base_url = current_app.config.get('BASE_URL', 'https://helpful-llama-57b693.netlify.app')
-    reset_link = f"{base_url}/reset-password?token={token}"
+    reset_link = f"https://helpful-llama-57b693.netlify.app/reset-password?token={token}"
 
-    # Tentative d'envoi email si clé Brevo disponible
-    if BREVO_API_KEY:
+    if RESEND_API_KEY:
         try:
-            api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
-            email_obj = sib_api_v3_sdk.SendSmtpEmail(
-                to=[{"email": email}],
-                sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
-                subject="Réinitialisation de votre mot de passe",
-                html_content=f"<a href='{reset_link}'>Cliquez ici</a>"
-            )
-            api_instance.send_transac_email(email_obj)
+            resend.Emails.send({
+                "from": "IT Support <onboarding@resend.dev>",
+                "to": [email],
+                "subject": "Réinitialisation de votre mot de passe",
+                "html": f"<a href='{reset_link}'>Cliquez ici pour réinitialiser</a>"
+            })
             print(f"✅ Email envoyé à {email}")
         except Exception as e:
-            print(f"❌ Erreur Brevo: {e}")
+            print(f"❌ Erreur Resend: {e}")
     else:
-        print("❌ Pas de clé Brevo, email non envoyé")
+        print("❌ RESEND_API_KEY manquante, lien direct: {reset_link}")
 
     return jsonify({'reset_link': reset_link, 'token': token}), 200
 
@@ -238,4 +232,4 @@ def reset_password():
     hashed = generate_password_hash(new_password).decode('utf-8')
     if update_user_password(email, hashed):
         return jsonify({'message': 'Votre mot de passe a été réinitialisé avec succès.'}), 200
-    return jsonify({'error': 'Erreur lors de la mise à jour'}), 500
+    return jsonify({'error': 'Erreur lors de la mise à jour'}), 500s
