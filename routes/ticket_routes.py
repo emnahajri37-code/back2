@@ -224,16 +224,25 @@ def delete_ticket_route(current_user, ticket_id):
     result = delete_ticket(ticket_id)
     return jsonify(result), 200
 
-@ticket.route("/predict", methods=["POST"])
+@ticket.route("/predict", methods=["POST", "OPTIONS"])
 def predict_route():
+    if request.method == "OPTIONS":
+        response = current_app.make_default_options_response()
+        response.headers.add("Access-Control-Allow-Origin", "https://helpful-llama-57b693.netlify.app")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
     try:
         data = request.get_json()
         if not data or "text" not in data:
             return jsonify({"error": "Missing 'text' field"}), 400
         text = data["text"]
-        cleaned = clean_text(text)
+        
+        # Valeur par défaut si l'IA ne fonctionne pas
         if priority_model is None:
             return jsonify({"prediction": "Moyenne", "confidence": 0.75})
+        
+        cleaned = clean_text(text)
         X = priority_vectorizer.transform([cleaned])
         proba = priority_model.predict_proba(X)[0]
         confidence = float(max(proba))
@@ -249,7 +258,6 @@ def predict_route():
     except Exception as e:
         print(f"Erreur dans predict_route: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
 @ticket.route("/uploads/<filename>")
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
