@@ -4,6 +4,7 @@ import re
 import os
 import uuid
 import datetime
+import warnings
 from werkzeug.utils import secure_filename
 from models.ticket_db import create_ticket, get_tickets_by_user, get_ticket_by_id, update_ticket, delete_ticket, get_all_tickets
 from auth_middleware import token_required
@@ -37,13 +38,35 @@ def save_uploaded_files(files):
     return saved
 
 # ==================== CHARGEMENT MODÈLE IA ====================
+priority_model = None
+priority_vectorizer = None
+priority_label_encoder = None
+
 try:
-    priority_model = joblib.load("models/priority_model.pkl")
-    priority_vectorizer = joblib.load("models/priority_vectorizer.pkl")
-    priority_label_encoder = joblib.load("models/priority_label_encoder.pkl")
-    print("✅ Modèle IA chargé")
+    warnings.filterwarnings("ignore", category=UserWarning)
+    
+    model_paths = {
+        "model": "models/priority_model.pkl",
+        "vectorizer": "models/priority_vectorizer.pkl",
+        "encoder": "models/priority_label_encoder.pkl"
+    }
+    
+    # Alternative: chercher aussi à la racine si pas trouvé dans models/
+    for key, path in model_paths.items():
+        if not os.path.exists(path):
+            # Chercher à la racine
+            root_path = os.path.basename(path)
+            if os.path.exists(root_path):
+                model_paths[key] = root_path
+    
+    priority_model = joblib.load(model_paths["model"])
+    priority_vectorizer = joblib.load(model_paths["vectorizer"])
+    priority_label_encoder = joblib.load(model_paths["encoder"])
+    print("✅ Modèle IA chargé avec succès")
 except Exception as e:
     priority_model = None
+    priority_vectorizer = None
+    priority_label_encoder = None
     print(f"⚠️ Modèle non chargé: {e}")
 
 def clean_text(text):
@@ -92,7 +115,7 @@ def create_ticket_route(current_user):
         attachments = []
 
     priority_predicted, confidence = predict_priority_hybrid(subject, body)
-    priority = priority_predicted  # priorité initiale = prédite
+    priority = priority_predicted
 
     ticket_record = create_ticket(
         subject, body, priority, priority_predicted,
@@ -182,8 +205,8 @@ def update_ticket_priority(current_user, ticket_id):
         return jsonify({"error": "Priority must be low, medium or high"}), 400
 
     update_data = {
-        "priorite": new_priority,                     # mise à jour manuelle
-        "priority_manual": True,                      # flag permanent
+        "priorite": new_priority,
+        "priority_manual": True,
         "priority_manual_override": True,
         "priority_updated_at": datetime.datetime.utcnow().isoformat()
     }
