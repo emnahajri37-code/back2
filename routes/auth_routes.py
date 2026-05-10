@@ -183,3 +183,86 @@ def check_email():
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+# ==================== ROUTE GOOGLE OAUTH ====================
+@auth.route("/google", methods=["POST", "OPTIONS"])
+def google_login():
+    if request.method == "OPTIONS":
+        return jsonify({"message": "OK"}), 200
+    
+    try:
+        data = request.get_json()
+        id_token_credential = data.get('credential') or data.get('id_token')
+        
+        if not id_token_credential:
+            return jsonify({"error": "Token Google manquant"}), 400
+        
+        # Vérification du token Google
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+        
+        GOOGLE_CLIENT_ID = "84499611206-pquink4aps0ked49ngi5t3rqk5p6ho6v.apps.googleusercontent.com"
+        try:
+            info = id_token.verify_oauth2_token(id_token_credential, google_requests.Request(), GOOGLE_CLIENT_ID)
+        except Exception as e:
+            print(f"❌ Google token verification failed: {str(e)}")
+            return jsonify({"error": "Token Google invalide"}), 400
+        
+        email = info.get('email')
+        name = info.get('name')
+        google_id = info.get('sub')
+        role = data.get('role', 'it_consultant')
+        
+        if not email:
+            return jsonify({"error": "Email non fourni par Google"}), 400
+        
+        # Vérifie si l'utilisateur existe
+        user = users_collection.find_one({"email": email})
+        
+        if not user:
+            # Création d'un nouvel utilisateur
+            user_data = {
+                "username": name,
+                "email": email,
+                "google_id": google_id,
+                "role": role,
+                "email_verified": True,
+                "active": True,
+                "created_at": datetime.datetime.utcnow().isoformat()
+            }
+            result = users_collection.insert_one(user_data)
+            user_id = str(result.inserted_id)
+            user_role = role
+            user_username = name
+        else:
+            # L'email existe déjà → vérifie le rôle
+            if user.get('role') != role:
+                return jsonify({
+                    "error": f"Cet email est déjà utilisé pour un compte {user.get('role')}. Veuillez vous connecter avec celui-ci."
+                }), 400
+            user_id = str(user['_id'])
+            user_role = user.get('role')
+            user_username = user.get('username')
+        
+        # Génération du token JWT
+        token = jwt.encode({
+            'user_id': user_id,
+            'email': email,
+            'role': user_role,
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
+        }, current_app.config['SECRET_KEY'], algorithm='HS256')
+        
+        return jsonify({
+            "success": True,
+            "message": "Connexion Google réussie",
+            "token": token,
+            "user": {
+                "_id": user_id,
+                "username": user_username,
+                "email": email,
+                "role": user_role
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Google auth error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
