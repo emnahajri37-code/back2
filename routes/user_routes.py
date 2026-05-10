@@ -1,11 +1,12 @@
 from flask import Blueprint, request, jsonify, current_app
-from flask_mail import Message
 import os
 from bson.objectid import ObjectId
 import jwt
 import datetime
 from flask_bcrypt import generate_password_hash
 from pymongo import MongoClient
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 
 user = Blueprint("user", __name__)
 
@@ -16,6 +17,15 @@ if not mongo_uri:
 client = MongoClient(mongo_uri)
 db = client["pfe_db"]
 users_collection = db["users"]
+
+# ==================== CONFIGURATION BREVO ====================
+BREVO_API_KEY = os.environ.get('BREVO_API_KEY')
+if BREVO_API_KEY:
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = BREVO_API_KEY
+    print("✅ Brevo configuré")
+else:
+    print("❌ BREVO_API_KEY manquante")
 
 # ==================== HELPER: TOKENS ====================
 def generate_reset_token(email):
@@ -47,7 +57,7 @@ def update_user_password(email, hashed_password):
 def update_user_by_id(user_id):
     if request.method == "OPTIONS":
         response = current_app.make_default_options_response()
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Origin", "https://helpful-llama-57b693.netlify.app")
         response.headers.add("Access-Control-Allow-Methods", "PUT, OPTIONS")
         response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         return response, 200
@@ -95,12 +105,11 @@ def update_user_by_id(user_id):
         return jsonify({"error": str(e)}), 500
 
 # ==================== SUPPRESSION SON PROPRE COMPTE ====================
-# ✅ IMPORTANT: cette route DOIT être déclarée AVANT /delete/<user_id>
 @user.route("/delete-me", methods=["DELETE", "OPTIONS"])
 def delete_me():
     if request.method == "OPTIONS":
         response = current_app.make_default_options_response()
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Origin", "https://helpful-llama-57b693.netlify.app")
         response.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
         response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         return response, 200
@@ -125,12 +134,11 @@ def delete_me():
         return jsonify({"error": str(e)}), 500
 
 # ==================== DELETE USER (par admin) ====================
-# ✅ IMPORTANT: cette route DOIT être déclarée APRÈS /delete-me
 @user.route("/delete/<user_id>", methods=["DELETE", "OPTIONS"])
 def delete_user_by_id(user_id):
     if request.method == "OPTIONS":
         response = current_app.make_default_options_response()
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Origin", "https://helpful-llama-57b693.netlify.app")
         response.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
         response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         return response, 200
@@ -177,25 +185,37 @@ def forgot_password():
         return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
     token = generate_reset_token(email)
-    base_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
+    base_url = current_app.config.get('BASE_URL', 'https://helpful-llama-57b693.netlify.app')
     reset_link = f"{base_url}/reset-password?token={token}"
 
+    if not BREVO_API_KEY:
+        print("❌ Pas de clé Brevo, email non envoyé")
+        return jsonify({'reset_link': reset_link, 'token': token}), 200
+
     try:
-        msg = Message(
-            subject="Réinitialisation de votre mot de passe",
-            recipients=[email],
-            html=f"""
-            <h2>Réinitialisation du mot de passe</h2>
-            <p>Cliquez sur le lien ci-dessous :</p>
-            <a href="{reset_link}">{reset_link}</a>
-            <p>Ce lien expire dans 1 heure.</p>
+        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+        
+        email_obj = sib_api_v3_sdk.SendSmtpEmail(
+            to=[{"email": email}],
+            sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
+            subject="🔐 Réinitialisation de votre mot de passe",
+            html_content=f"""
+            <html>
+            <body>
+                <h2>Réinitialisation de mot de passe</h2>
+                <p>Bonjour,</p>
+                <p>Cliquez sur le lien ci-dessous pour réinitialiser votre mot de passe :</p>
+                <a href="{reset_link}">{reset_link}</a>
+                <p>Ce lien expire dans <strong>1 heure</strong>.</p>
+                <p>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
+            </body>
+            </html>
             """
         )
-        mail = current_app.extensions.get('mail')
-        mail.send(msg)
+        api_instance.send_transac_email(email_obj)
         print(f"✅ Email envoyé à {email}")
     except Exception as e:
-        print(f"❌ Erreur envoi email: {e}")
+        print(f"❌ Erreur Brevo: {e}")
 
     return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
