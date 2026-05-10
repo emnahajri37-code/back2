@@ -185,10 +185,28 @@ def forgot_password():
         return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
     token = generate_reset_token(email)
-    reset_link = f"https://helpful-llama-57b693.netlify.app/reset-password?token={token}"
-    
-    # Retourne le lien directement (sans email)
+    base_url = current_app.config.get('BASE_URL', 'https://helpful-llama-57b693.netlify.app')
+    reset_link = f"{base_url}/reset-password?token={token}"
+
+    # Tentative d'envoi email si clé Brevo disponible
+    if BREVO_API_KEY:
+        try:
+            api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+            email_obj = sib_api_v3_sdk.SendSmtpEmail(
+                to=[{"email": email}],
+                sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
+                subject="Réinitialisation de votre mot de passe",
+                html_content=f"<a href='{reset_link}'>Cliquez ici</a>"
+            )
+            api_instance.send_transac_email(email_obj)
+            print(f"✅ Email envoyé à {email}")
+        except Exception as e:
+            print(f"❌ Erreur Brevo: {e}")
+    else:
+        print("❌ Pas de clé Brevo, email non envoyé")
+
     return jsonify({'reset_link': reset_link, 'token': token}), 200
+
 # ==================== RESET PASSWORD ====================
 @user.route("/reset-password", methods=["POST"])
 def reset_password():
