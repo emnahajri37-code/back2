@@ -236,28 +236,43 @@ def predict_route():
         data = request.get_json()
         if not data or "text" not in data:
             return jsonify({"error": "Missing 'text' field"}), 400
-        text = data["text"]
         
-        # Valeur par défaut si l'IA ne fonctionne pas
-        if priority_model is None:
-            return jsonify({"prediction": "Moyenne", "confidence": 0.75})
+        text = data["text"].lower()
         
-        cleaned = clean_text(text)
-        X = priority_vectorizer.transform([cleaned])
-        proba = priority_model.predict_proba(X)[0]
-        confidence = float(max(proba))
-        predicted_class = priority_model.predict(X)[0]
-        category = priority_label_encoder.inverse_transform([predicted_class])[0]
-        category_map = {"high": "Haute", "medium": "Moyenne", "low": "Basse"}
-        display_category = category_map.get(category, category)
-        if confidence < 0.5:
-            confidence = 0.5 + (0.5 - confidence) * 0.3
-        confidence = min(confidence, 0.95)
-        confidence = round(confidence, 2)
-        return jsonify({"prediction": display_category, "confidence": confidence})
+        # 1. Essaye d'utiliser les modèles IA s'ils sont chargés
+        if priority_model is not None and priority_vectorizer is not None and priority_label_encoder is not None:
+            try:
+                cleaned = clean_text(text)
+                X = priority_vectorizer.transform([cleaned])
+                proba = priority_model.predict_proba(X)[0]
+                confidence = float(max(proba))
+                predicted_class = priority_model.predict(X)[0]
+                category = priority_label_encoder.inverse_transform([predicted_class])[0]
+                category_map = {"high": "Haute", "medium": "Moyenne", "low": "Basse"}
+                display_category = category_map.get(category, category)
+                if confidence < 0.5:
+                    confidence = 0.5 + (0.5 - confidence) * 0.3
+                confidence = min(confidence, 0.95)
+                confidence = round(confidence, 2)
+                return jsonify({"prediction": display_category, "confidence": confidence})
+            except Exception as e:
+                print(f"Erreur IA: {e}")
+                # Continue vers le fallback
+        
+        # 2. Fallback : règles basées sur mots-clés
+        urgent_keywords = ["urgent", "critical", "panic", "urgence", "critique", "asap", "immediate", "bloquant"]
+        medium_keywords = ["bug", "erreur", "problem", "issue", "important", "corriger", "fix", "amélioration"]
+        
+        for word in urgent_keywords:
+            if word in text:
+                return jsonify({"prediction": "Haute", "confidence": 0.85})
+        
+        for word in medium_keywords:
+            if word in text:
+                return jsonify({"prediction": "Moyenne", "confidence": 0.75})
+        
+        return jsonify({"prediction": "Basse", "confidence": 0.65})
+        
     except Exception as e:
-        print(f"Erreur dans predict_route: {str(e)}")
+        print(f"Erreur predict: {str(e)}")
         return jsonify({"error": str(e)}), 500
-@ticket.route("/uploads/<filename>")
-def uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
