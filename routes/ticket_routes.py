@@ -224,6 +224,7 @@ def delete_ticket_route(current_user, ticket_id):
     result = delete_ticket(ticket_id)
     return jsonify(result), 200
 
+
 @ticket.route("/predict", methods=["POST", "OPTIONS"])
 def predict_route():
     if request.method == "OPTIONS":
@@ -239,38 +240,29 @@ def predict_route():
         
         text = data["text"].lower()
         
-        # 1. Essaye d'utiliser les modèles IA s'ils sont chargés
-        if priority_model is not None and priority_vectorizer is not None and priority_label_encoder is not None:
-            try:
-                cleaned = clean_text(text)
-                X = priority_vectorizer.transform([cleaned])
-                proba = priority_model.predict_proba(X)[0]
-                confidence = float(max(proba))
-                predicted_class = priority_model.predict(X)[0]
-                category = priority_label_encoder.inverse_transform([predicted_class])[0]
-                category_map = {"high": "Haute", "medium": "Moyenne", "low": "Basse"}
-                display_category = category_map.get(category, category)
-                if confidence < 0.5:
-                    confidence = 0.5 + (0.5 - confidence) * 0.3
-                confidence = min(confidence, 0.95)
-                confidence = round(confidence, 2)
-                return jsonify({"prediction": display_category, "confidence": confidence})
-            except Exception as e:
-                print(f"Erreur IA: {e}")
-                # Continue vers le fallback
+        # Fallback amélioré avec plus de mots-clés
+        high_keywords = [
+            "urgent", "critique", "critical", "panne", "crash", "bloquant", 
+            "blocking", "emergency", "asap", "immédiat", "incident", 
+            "important", "sécurité", "security", "vital"
+        ]
         
-        # 2. Fallback : règles basées sur mots-clés
-        urgent_keywords = ["urgent", "critical", "panic", "urgence", "critique", "asap", "immediate", "bloquant"]
-        medium_keywords = ["bug", "erreur", "problem", "issue", "important", "corriger", "fix", "amélioration"]
+        medium_keywords = [
+            "bug", "erreur", "error", "problem", "issue", "corriger", "fix", 
+            "amélioration", "amelioration", "modification", "update"
+        ]
         
-        for word in urgent_keywords:
+        # Vérification des mots-clés HAUTE priorité
+        for word in high_keywords:
             if word in text:
                 return jsonify({"prediction": "Haute", "confidence": 0.85})
         
+        # Vérification des mots-clés MOYENNE priorité
         for word in medium_keywords:
             if word in text:
                 return jsonify({"prediction": "Moyenne", "confidence": 0.75})
         
+        # Par défaut : BASSE priorité
         return jsonify({"prediction": "Basse", "confidence": 0.65})
         
     except Exception as e:
