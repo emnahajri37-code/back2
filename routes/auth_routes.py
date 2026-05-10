@@ -8,8 +8,6 @@ from flask_bcrypt import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import os
-import sib_api_v3_sdk
-from sib_api_v3_sdk.rest import ApiException
 
 auth = Blueprint("auth", __name__)
 
@@ -22,45 +20,27 @@ client = MongoClient(MONGO_URI)
 db = client["pfe_db"]
 users_collection = db["users"]
 
-# ==================== CONFIGURATION BREVO ====================
-BREVO_API_KEY = os.environ.get('BREVO_API_KEY')
-if BREVO_API_KEY:
-    configuration = sib_api_v3_sdk.Configuration()
-    configuration.api_key['api-key'] = BREVO_API_KEY
-    print("✅ Brevo configuré")
-else:
-    print("❌ BREVO_API_KEY manquante")
-
 # ==================== FONCTIONS ====================
 def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
 def send_verification_email(user_email, username, code):
-    if not BREVO_API_KEY:
-        print("❌ Pas de clé Brevo")
-        return False
-    
     try:
-        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
-        
-        email_obj = sib_api_v3_sdk.SendSmtpEmail(
-            to=[{"email": user_email}],
-            sender={"email": "emnasellami18@gmail.com", "name": "IT Support"},
+        msg = Message(
             subject="🔐 Votre code de vérification",
-            html_content=f"""
+            recipients=[user_email],
+            html=f"""
             <h2>Bonjour {username} !</h2>
-            <p>Votre code : <strong style="font-size:24px">{code}</strong></p>
-            <p>Valable 10 minutes.</p>
+            <p>Votre code de vérification : <strong>{code}</strong></p>
+            <p>Ce code expire dans 10 minutes.</p>
             """
         )
-        api_instance.send_transac_email(email_obj)
+        mail = current_app.extensions.get('mail')
+        mail.send(msg)
         print(f"✅ Email envoyé à {user_email}")
         return True
-    except ApiException as e:
-        print(f"❌ Erreur Brevo: {e.body}")
-        return False
     except Exception as e:
-        print(f"❌ Erreur: {e}")
+        print(f"❌ Erreur envoi email: {e}")
         return False
 
 # ==================== ROUTES ====================
