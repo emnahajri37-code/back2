@@ -232,4 +232,4 @@ def reset_password():
     hashed = generate_password_hash(new_password).decode('utf-8')
     if update_user_password(email, hashed):
         return jsonify({'message': 'Votre mot de passe a été réinitialisé avec succès.'}), 200
-    return jsonify({'error': 'Erreur lors de la mise à jour'}), 500s
+    return jsonify({'error': 'Erreur lors de la mise à jour'}), 500
