@@ -42,32 +42,151 @@ def update_user_password(email, hashed_password):
     )
     return result.modified_count > 0
 
+# ==================== UPDATE USER ====================
+@user.route("/update/<user_id>", methods=["PUT", "OPTIONS"])
+def update_user_by_id(user_id):
+    if request.method == "OPTIONS":
+        response = current_app.make_default_options_response()
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Methods", "PUT, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return response, 200
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+
+    try:
+        token = auth_header.split()[1]
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        current_user_id = payload.get('user_id')
+        current_user_role = payload.get('role')
+
+        if current_user_role not in ['admin', 'it_consultant'] and str(current_user_id) != user_id:
+            return jsonify({"error": "Action non autorisée"}), 403
+
+        data = request.json
+        if not data:
+            return jsonify({"error": "Données manquantes"}), 400
+
+        allowed_fields = ["username", "name", "email", "phone", "location"]
+        update_data = {k: v for k, v in data.items() if k in allowed_fields and v is not None}
+
+        if "password" in data and data["password"]:
+            if len(data["password"]) < 6:
+                return jsonify({"error": "Le mot de passe doit contenir au moins 6 caractères"}), 400
+            update_data["password"] = generate_password_hash(data["password"]).decode('utf-8')
+
+        if not update_data:
+            return jsonify({"error": "Aucun champ valide à mettre à jour"}), 400
+
+        result = users_collection.update_one({"_id": ObjectId(user_id)}, {"$set": update_data})
+        if result.matched_count == 0:
+            return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+        user_updated = users_collection.find_one({"_id": ObjectId(user_id)}, {"password": 0})
+        if user_updated:
+            user_updated["_id"] = str(user_updated["_id"])
+        return jsonify({"message": "Utilisateur mis à jour", "user": user_updated}), 200
+
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token expiré"}), 401
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ==================== SUPPRESSION SON PROPRE COMPTE ====================
+# ✅ IMPORTANT: cette route DOIT être déclarée AVANT /delete/<user_id>
+@user.route("/delete-me", methods=["DELETE", "OPTIONS"])
+def delete_me():
+    if request.method == "OPTIONS":
+        response = current_app.make_default_options_response()
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return response, 200
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+
+    try:
+        token = auth_header.split()[1]
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        user_id = payload.get('user_id')
+
+        result = users_collection.delete_one({"_id": ObjectId(user_id)})
+        if result.deleted_count:
+            return jsonify({"message": "Compte supprimé avec succès"}), 200
+        return jsonify({"error": "Compte non trouvé"}), 404
+
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token expiré"}), 401
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ==================== DELETE USER (par admin) ====================
+# ✅ IMPORTANT: cette route DOIT être déclarée APRÈS /delete-me
+@user.route("/delete/<user_id>", methods=["DELETE", "OPTIONS"])
+def delete_user_by_id(user_id):
+    if request.method == "OPTIONS":
+        response = current_app.make_default_options_response()
+        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
+        response.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return response, 200
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Token manquant"}), 401
+
+    try:
+        token = auth_header.split()[1]
+        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        current_user_id = payload.get('user_id')
+        current_user_role = payload.get('role')
+
+        if current_user_role not in ['admin', 'it_consultant']:
+            return jsonify({"error": "Action non autorisée. Droits administrateur requis."}), 403
+
+        if str(current_user_id) == user_id:
+            return jsonify({"error": "Vous ne pouvez pas supprimer votre propre compte"}), 400
+
+        result = users_collection.delete_one({"_id": ObjectId(user_id)})
+        if result.deleted_count:
+            return jsonify({"message": "Utilisateur supprimé avec succès"}), 200
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token expiré"}), 401
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ==================== FORGOT PASSWORD ====================
 @user.route("/forgot-password", methods=["POST", "OPTIONS"])
 def forgot_password():
     if request.method == "OPTIONS":
         return jsonify({"message": "OK"}), 200
-    
+
     data = request.get_json()
     email = data.get('email', '').strip().lower()
     if not email:
         return jsonify({'error': 'Email requis'}), 400
-    
-    user = users_collection.find_one({"email": email})
-    if not user:
+
+    user_doc = users_collection.find_one({"email": email})
+    if not user_doc:
         return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
-    
+
     token = generate_reset_token(email)
     base_url = current_app.config.get('BASE_URL', 'https://sparkling-wisp-363896.netlify.app')
     reset_link = f"{base_url}/reset-password?token={token}"
-    
+
     try:
         msg = Message(
             subject="Réinitialisation de votre mot de passe",
             recipients=[email],
             html=f"""
             <h2>Réinitialisation du mot de passe</h2>
-            <p>Cliquez sur le lien ci-dessous pour réinitialiser votre mot de passe :</p>
+            <p>Cliquez sur le lien ci-dessous :</p>
             <a href="{reset_link}">{reset_link}</a>
             <p>Ce lien expire dans 1 heure.</p>
             """
@@ -77,7 +196,7 @@ def forgot_password():
         print(f"✅ Email envoyé à {email}")
     except Exception as e:
         print(f"❌ Erreur envoi email: {e}")
-    
+
     return jsonify({'message': 'Si cet email est enregistré, vous recevrez un lien.'}), 200
 
 # ==================== RESET PASSWORD ====================
@@ -112,32 +231,3 @@ def reset_password():
     if update_user_password(email, hashed):
         return jsonify({'message': 'Votre mot de passe a été réinitialisé avec succès.'}), 200
     return jsonify({'error': 'Erreur lors de la mise à jour'}), 500
-
-# ==================== DELETE ME ====================
-@user.route("/delete-me", methods=["POST", "OPTIONS"])
-def delete_me():
-    if request.method == "OPTIONS":
-        response = current_app.make_default_options_response()
-        response.headers.add("Access-Control-Allow-Origin", "https://sparkling-wisp-363896.netlify.app")
-        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        return response, 200
-    
-    auth_header = request.headers.get("Authorization")
-    if not auth_header:
-        return jsonify({"error": "Token manquant"}), 401
-    
-    try:
-        token = auth_header.split()[1]
-        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
-        user_id = payload.get('user_id')
-        
-        result = users_collection.delete_one({"_id": ObjectId(user_id)})
-        if result.deleted_count:
-            return jsonify({"message": "Compte supprimé avec succès"}), 200
-        return jsonify({"error": "Compte non trouvé"}), 404
-        
-    except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Token expiré"}), 401
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
