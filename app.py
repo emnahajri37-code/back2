@@ -29,7 +29,7 @@ app.extensions['mail'] = mail
 
 # ==================== CORS ====================
 CORS(app, 
-     origins=["https://sparkling-wisp-363896.netlify.app"],
+     origins=[""https://silly-haupia-6671bb.netlify.app""],
      allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
      supports_credentials=True)
